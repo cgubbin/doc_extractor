@@ -1,0 +1,53 @@
+Metadata-Version: 2.4
+Name: patent-ingest
+Version: 0.1.0
+Summary: Poppler-based ingestion of Google Patents PDFs: text, figures, claims diff, excerpts.
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: pillow>=12.1.0
+Requires-Dist: pymupdf>=1.26.7
+Requires-Dist: pypdf[full]>=6.6.0
+Requires-Dist: scikit-learn>=1.3
+Provides-Extra: dev
+Requires-Dist: pytest>=7.4; extra == "dev"
+Requires-Dist: ruff>=0.5; extra == "dev"
+Requires-Dist: pillow>=10.0; extra == "dev"
+Requires-Dist: numpy>=1.24; extra == "dev"
+
+# patent-ingest
+
+A small, robust submodule to ingest patent PDFs (e.g., downloaded from Google Patents):
+
+- Extract text via Poppler `pdftotext`
+- Extract figures as JPG via Poppler `pdftoppm` (guaranteed)
+- Parse claims (handles two-column merged claim text patterns)
+- Align and diff claims between submitted vs granted versions
+- Extract relevant excerpts for downstream analysis
+
+## Install (editable)
+
+```bash
+pip install -e .[dev]
+```
+
+## CLI
+
+```bash
+patent-ingest process --pdf submitted.pdf --out runs --doc-id submitted
+patent-ingest process --pdf granted.pdf   --out runs --doc-id granted
+patent-ingest compare --submitted runs/submitted --approved runs/granted --out runs/comparison
+```
+
+## Outputs
+
+Each processed document creates:
+
+- `text/raw.txt`, `text/normalized.txt`
+- `figures/pages/page-0001.jpg ...`
+- `figures/selected/figure_page_0002.jpg ...` (auto-selected figure-like pages)
+- `meta/claims.json`, `meta/sections.json`, `meta/run_manifest.json`
+
+Comparison creates:
+
+- `meta/claims_diff.json`
+- `meta/relevant_excerpts.json`

@@ -1,0 +1,30 @@
+{
+    "patent_number_normalized": "US7629993B2",
+    "title": "AUTOMATED WAFER DEFECT INSPECTION SYSTEM USING BACKSIDE ILLUMINATION",
+    "assignee": "Rudolph Technologies, Inc., Flanders, NJ (US)",
+    "inventors": [
+        "Mark Harless, Plymouth, MN",
+        "Jeremy Jenum, Plymouth, MN",
+        "Willard Charles Raymond, Plymouth, MN"
+    ],
+    "application_no": "10/262,173",
+    "filed_iso": "2002-09-30",
+    "grant_iso": "2009-12-08",
+    "reported_claim_count": 16,
+    "reported_drawing_sheet_count": 4,
+    "cited_us_patents_digits": [
+        "3963354",
+        "4148065",
+        "4209257",
+        "4527070",
+        "5095204",
+        "5539514",
+        "5737072",
+        "5892579",
+        "6084716",
+        "6324298",
+        "6779386"
+    ],
+    "cited_us_publications": [],
+    "front_matter_pages_to_scan": 1
+}

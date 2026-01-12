@@ -1,0 +1,6 @@
+.git
+src/__pycache__/
+src/data/
+.direnv/
+.venv/
+

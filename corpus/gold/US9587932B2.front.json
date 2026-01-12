@@ -1,0 +1,37 @@
+{
+    "patent_number_normalized": "US9587932B2",
+    "title": "SYSTEM FOR DIRECTLY MEASURING THE DEPTH OF A HIGH ASPECT RATIO ETCHED FEATURE ON A WAFER",
+    "assignee": "Rudolph Technologies, Inc., Wilmington, MA (US)",
+    "inventors": [
+        "David S. Marx, Newbury Park, CA",
+        "David L. Grant, Newbury Park, CA"
+    ],
+    "application_no": "15/142,864",
+    "filed_iso": "2016-04-29",
+    "grant_iso": "2017-03-07",
+    "reported_claim_count": 15,
+    "reported_drawing_sheet_count": 6,
+    "cited_us_patents_digits": [
+        "6806105",
+        "6822745",
+        "6878301"
+    ],
+    "cited_us_publications": [
+        "20010043333",
+        "20020180991",
+        "20030165178",
+        "20040112863",
+        "20050057747",
+        "20050109729",
+        "20050191858",
+        "20050239223",
+        "20060232768",
+        "20070148792",
+        "20070293052",
+        "20080049214",
+        "20080100222",
+        "20080165357",
+        "20090174931"
+    ],
+    "front_matter_pages_to_scan": 2
+}

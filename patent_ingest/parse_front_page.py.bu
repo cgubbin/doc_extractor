@@ -1,0 +1,739 @@
+"""
+patent_front_page.py
+
+Front-page parser for US granted patent PDFs extracted with pypdf.
+
+Design goals:
+- Robust to column interleaving / odd extraction ordering from PDF text extractors.
+- Extract: title, abstract (text only), assignee (clean), inventors (parsed list),
+  application number, filing date (ISO), grant date (ISO), patent number (normalized),
+  reported counts ("X Claims, Y Drawing Sheets"), and cited US patents.
+- Provide provenance spans (character offsets into cleaned front-page text).
+- Provide QA diagnostics (warnings + info).
+
+Usage (with pypdf):
+    from pypdf import PdfReader
+    from patent_front_page import extract_page0_text, parse_front_page
+
+    reader = PdfReader("granted.pdf")
+    front_text = extract_page0_text(reader)  # cleans but preserves key header line
+    result = parse_front_page(front_text)
+"""
+
+from __future__ import annotations
+
+import re
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+
+# =============================================================================
+# Cleaning helpers (front page)
+# =============================================================================
+
+# On the front page, we intentionally do NOT strip the "US 7,629,993 B2" line.
+# We only remove standalone page numbers and normalize whitespace.
+_FRONT_STRIP_PATTERNS = [
+    re.compile(r"^\s*\d+\s*$", re.MULTILINE),
+]
+
+
+def dehyphenate(text: str) -> str:
+    # Join words split by hyphen at line end: "inspec-\n tion" -> "inspection"
+    return re.sub(r"(\w)-\n(\w)", r"\1\2", text or "")
+
+
+def normalize_whitespace(text: str) -> str:
+    text = (text or "").replace("\r", "\n")
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
+def strip_front_page_noise(text: str) -> str:
+    cleaned = text or ""
+    for pat in _FRONT_STRIP_PATTERNS:
+        cleaned = pat.sub("", cleaned)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()
+
+
+# =============================================================================
+# pypdf integration helper
+# =============================================================================
+
+
+def extract_page0_text(pdf_reader: Any) -> str:
+    """
+    Extract and clean page 0 text from a pypdf PdfReader.
+    """
+    page0 = pdf_reader.pages[0]
+    t = page0.extract_text() or ""
+    t = dehyphenate(t)
+    t = strip_front_page_noise(t)
+    t = normalize_whitespace(t)
+    return t
+
+
+# =============================================================================
+# Generic helpers
+# =============================================================================
+
+
+def normalize_whitespace_basic(s: str) -> str:
+    return re.sub(r"\s+", " ", (s or "")).strip()
+
+
+def strip_leading_label(text: str, labels: List[str]) -> str:
+    """
+    Removes one of the provided labels from the beginning of a string, if present.
+    Example: "Appl. No.: 12/345,678" -> "12/345,678"
+    """
+    t = (text or "").strip()
+    for lab in labels:
+        pat = re.compile(rf"^\s*{re.escape(lab)}\s*[:\-]?\s*", re.IGNORECASE)
+        if pat.search(t):
+            return pat.sub("", t).strip()
+    return t
+
+
+# =============================================================================
+# INID parsing (best-effort)
+# =============================================================================
+
+INID_MARKER_PAT = re.compile(r"\(\s*(\d{2})\s*\)")  # e.g., "(54)"
+
+
+def parse_inid_blocks(front_text: str) -> Dict[str, Dict[str, Any]]:
+    """
+    Returns dict: code -> { "text": str, "span": {"start": int, "end": int} }
+
+    NOTE: Due to column interleaving, INID slices may be imperfect. We use them as
+    hints and combine with heading/anchor-based extraction for robust fields.
+    """
+    matches = list(INID_MARKER_PAT.finditer(front_text))
+    blocks: Dict[str, Dict[str, Any]] = {}
+    for i, m in enumerate(matches):
+        code = m.group(1)
+        start = m.end()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(front_text)
+        value = front_text[start:end].strip()
+        # Keep first occurrence; repeated codes can happen.
+        if code not in blocks and value:
+            blocks[code] = {"text": value, "span": {"start": start, "end": end}}
+    return blocks
+
+
+# =============================================================================
+# Dates
+# =============================================================================
+
+_MONTH_FIX = {
+    "Jan.": "Jan",
+    "Feb.": "Feb",
+    "Mar.": "Mar",
+    "Apr.": "Apr",
+    "Jun.": "Jun",
+    "Jul.": "Jul",
+    "Aug.": "Aug",
+    "Sep.": "Sep",
+    "Sept.": "Sep",
+    "Oct.": "Oct",
+    "Nov.": "Nov",
+    "Dec.": "Dec",
+}
+
+
+def parse_uspto_date_to_iso(raw: str) -> Optional[str]:
+    """
+    Accepts strings like "Dec. 8, 2009" or "December 8, 2009".
+    Returns ISO date "2009-12-08" or None if unparseable.
+    """
+    if not raw:
+        return None
+    s = normalize_whitespace_basic(raw)
+    for k, v in _MONTH_FIX.items():
+        s = s.replace(k, v)
+
+    for fmt in ("%b %d, %Y", "%B %d, %Y"):
+        try:
+            dt = datetime.strptime(s, fmt)
+            return dt.date().isoformat()
+        except ValueError:
+            pass
+    return None
+
+
+# =============================================================================
+# Patent number normalization
+# =============================================================================
+
+PATENT_HEADER_PAT = re.compile(r"\bUS\s+[\d,\s]{7,15}\s+[A-Z]\d\b")  # e.g., "US 7,629,993 B2"
+KIND_CODE_PAT = re.compile(r"\b([A-Z]\d)\b")
+
+
+def normalize_patent_number_digits(s: str) -> Optional[str]:
+    """
+    Extract digit-only patent number from strings like:
+      "US 7,629,993 B2" -> "7629993"
+    Returns None if no 7-8 digit sequence found.
+    """
+    if not s:
+        return None
+    m = re.search(r"\b(\d{1,2}),(\d{3}),(\d{3})\b", s)
+    if m:
+        return f"{m.group(1)}{m.group(2)}{m.group(3)}"
+    m = re.search(r"\b(\d{7,8})\b", s)
+    return m.group(1) if m else None
+
+
+def normalize_us_patent_header(raw: str) -> Optional[str]:
+    """
+    "US 7,629,993 B2" -> "US7629993B2"
+    """
+    if not raw:
+        return None
+    digits = normalize_patent_number_digits(raw)
+    if not digits:
+        return None
+    mk = KIND_CODE_PAT.search(raw)
+    kind = mk.group(1) if mk else ""
+    return f"US{digits}{kind}"
+
+
+def comma_format_us_patent(digits: str) -> str:
+    """
+    7629993 -> 7,629,993
+    """
+    if not digits or not digits.isdigit():
+        return digits
+    return f"{int(digits):,}"
+
+
+# =============================================================================
+# Counts line (claims, drawing sheets)
+# =============================================================================
+
+REPORTED_COUNTS_PAT = re.compile(
+    r"\b(\d+)\s+Claims?\s*,\s*(\d+)\s+Drawing\s+Sheets?\b",
+    re.IGNORECASE,
+)
+
+
+def extract_reported_counts(front_text: str) -> Optional[Dict[str, Any]]:
+    m = REPORTED_COUNTS_PAT.search(front_text)
+    if not m:
+        return None
+    return {
+        "reported_claim_count": int(m.group(1)),
+        "reported_drawing_sheet_count": int(m.group(2)),
+        "source_snippet": m.group(0),
+        "span": {"start": m.start(), "end": m.end()},
+    }
+
+
+# =============================================================================
+# Abstract extraction (text-only)
+# =============================================================================
+
+ABSTRACT_HEAD_PAT = re.compile(
+    r"\(\s*57\s*\)\s*ABSTRACT\b|^\s*ABSTRACT\b",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def extract_abstract(front_text: str) -> Dict[str, Any]:
+    """
+    Returns:
+      { "value": str, "span": {start,end} or None, "heading_span": {start,end} or None }
+
+    Abstract starts at the END of heading match so "(57) ABSTRACT" is excluded.
+    Ends at counts line if present, else end of page.
+    """
+    hm = ABSTRACT_HEAD_PAT.search(front_text)
+    if not hm:
+        return {"value": "", "span": None, "heading_span": None}
+
+    abs_start = hm.end()
+    abs_end = len(front_text)
+
+    cm = REPORTED_COUNTS_PAT.search(front_text)
+    if cm and cm.start() > hm.start():
+        abs_end = cm.start()
+
+    value = front_text[abs_start:abs_end].strip()
+    return {
+        "value": value,
+        "span": {"start": abs_start, "end": abs_end},
+        "heading_span": {"start": hm.start(), "end": hm.end()},
+    }
+
+
+# =============================================================================
+# Title extraction robust to (56) intrusion
+# =============================================================================
+
+# This label often appears mid-title due to extraction order; remove the label only.
+REF_CITED_LABEL_PAT = re.compile(r"\(\s*56\s*\)\s*References\s+Cited", re.IGNORECASE)
+
+
+def extract_title_between(front_text: str) -> Optional[Dict[str, Any]]:
+    """
+    Robust title extraction:
+    - Start after "(54)"
+    - End at "(75)" if present (common in many grants), else at next INID marker.
+    - Remove embedded "(56) References Cited" label if it appears inside the title span.
+    - Normalize whitespace into a single line string.
+    """
+    m54 = re.search(r"\(\s*54\s*\)", front_text)
+    if not m54:
+        return None
+
+    m75 = re.search(r"\(\s*75\s*\)", front_text)
+    if m75 and m75.start() > m54.end():
+        end = m75.start()
+    else:
+        # fallback: next INID marker after 54
+        mnext = INID_MARKER_PAT.search(front_text, pos=m54.end())
+        end = mnext.start() if mnext else len(front_text)
+
+    raw_span_text = front_text[m54.end() : end]
+    cleaned = REF_CITED_LABEL_PAT.sub("", raw_span_text)
+    cleaned = normalize_whitespace_basic(cleaned) or None
+
+    return {"value": cleaned, "span": {"start": m54.end(), "end": end}}
+
+
+# =============================================================================
+# Assignee extraction (clean, do NOT store notice)
+# =============================================================================
+
+# Stop at common boilerplate markers.
+ASSIGNEE_STOP_PAT = re.compile(
+    r"(\(\*\)|\*|\bNotice\b\s*[:\-]|\bpatent\s+is\s+extended\s+or\s+adjusted\b)",
+    re.IGNORECASE,
+)
+
+
+def extract_assignee_clean(inid_blocks: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Extract assignee from (73) or (71). Remove notice/boilerplate; do not store notice.
+    """
+    raw = None
+    span = None
+    if "73" in inid_blocks:
+        raw = inid_blocks["73"]["text"].strip()
+        span = inid_blocks["73"]["span"]
+    elif "71" in inid_blocks:
+        raw = inid_blocks["71"]["text"].strip()
+        span = inid_blocks["71"]["span"]
+    else:
+        return {"raw": None, "value": None, "span": None}
+
+    raw2 = strip_leading_label(raw, ["Assignee", "Assignees", "Assignee:"])
+    m = ASSIGNEE_STOP_PAT.search(raw2)
+    assignee_only = raw2[: m.start()].strip() if m else raw2.strip()
+
+    return {"raw": raw, "value": assignee_only or None, "span": span}
+
+
+# =============================================================================
+# Inventors parsing
+# =============================================================================
+
+INVENTOR_SPLIT_PAT = re.compile(r"\s*;\s*")
+LOCATION_IN_PARENS_PAT = re.compile(r"\(([^)]+)\)\s*$")  # trailing "(City, ST)" or "(Country)"
+
+
+def normalize_entity_name(name: str) -> str:
+    n = normalize_whitespace_basic(name)
+    n = n.replace("’", "'").replace("–", "-").replace("—", "-")
+    n = re.sub(r"[,\.;:\s]+$", "", n)
+    return n
+
+
+def split_name_and_location(raw: str) -> Dict[str, Optional[str]]:
+    raw_clean = normalize_whitespace_basic(raw)
+    m = LOCATION_IN_PARENS_PAT.search(raw_clean)
+    if m:
+        loc = normalize_whitespace_basic(m.group(1))
+        nm = raw_clean[: m.start()].strip()
+    else:
+        loc = None
+        nm = raw_clean
+    return {"name": nm or None, "location": loc}
+
+
+def parse_inventors(raw_inventors_text: str) -> List[Dict[str, Optional[str]]]:
+    raw_inventors_text = raw_inventors_text or ""
+    chunks = [c.strip() for c in INVENTOR_SPLIT_PAT.split(raw_inventors_text) if c.strip()]
+    out: List[Dict[str, Optional[str]]] = []
+    for c in chunks:
+        parts = split_name_and_location(c)
+        nm = parts["name"]
+        out.append(
+            {
+                "raw": c,
+                "name": nm,
+                "location": parts["location"],
+                "normalized_name": normalize_entity_name(nm) if nm else None,
+            }
+        )
+    return out
+
+
+def extract_inventors(front_text: str, inid_blocks: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Inventors may appear under:
+    - (72)
+    - (75) Inventors:
+    - or as a label-based substring depending on extraction order.
+    """
+    if "72" in inid_blocks:
+        raw = inid_blocks["72"]["text"].strip()
+        span = inid_blocks["72"]["span"]
+    elif "75" in inid_blocks:
+        raw = inid_blocks["75"]["text"].strip()
+        span = inid_blocks["75"]["span"]
+    else:
+        m = re.search(r"\bInventors?\s*[:\-]\s*(.+)", front_text, flags=re.IGNORECASE)
+        if not m:
+            return {"raw": None, "value": None, "span": None, "parsed": []}
+        raw = m.group(1).strip()
+        span = {"start": m.start(1), "end": m.end(1)}
+
+    raw = strip_leading_label(raw, ["Inventors", "Inventor"])
+    parsed = parse_inventors(raw)
+    return {"raw": raw, "value": raw, "span": span, "parsed": parsed}
+
+
+# =============================================================================
+# Application number + filing date + grant date
+# =============================================================================
+
+DATE_OF_PATENT_PAT = re.compile(
+    r"Date of Patent\s*[:\-]\s*([A-Za-z\.]+\s+\d{1,2},\s+\d{4})",
+    re.IGNORECASE,
+)
+
+
+def extract_application_number(inid_blocks: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+    raw = inid_blocks.get("21", {}).get("text")
+    span = inid_blocks.get("21", {}).get("span")
+    clean = strip_leading_label(
+        raw or "", ["Appl. No.", "Appl No.", "Application No.", "Application No"]
+    )
+    return {"raw": raw, "value": clean or None, "span": span}
+
+
+def extract_filed_date(inid_blocks: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+    raw = inid_blocks.get("22", {}).get("text")
+    span = inid_blocks.get("22", {}).get("span")
+    clean = strip_leading_label(raw or "", ["Filed"])
+    iso = parse_uspto_date_to_iso(clean) if clean else None
+    return {"raw": raw, "value": clean or None, "iso": iso, "span": span}
+
+
+def extract_grant_date(front_text: str, inid_blocks: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+    raw = inid_blocks.get("45", {}).get("text")
+    span = inid_blocks.get("45", {}).get("span")
+
+    if raw:
+        clean = strip_leading_label(raw, ["Date of Patent", "Date of Patent:"])
+        iso = parse_uspto_date_to_iso(clean) if clean else None
+        return {"raw": raw, "value": clean or None, "iso": iso, "span": span}
+
+    # fallback to explicit "Date of Patent:" in header area
+    m = DATE_OF_PATENT_PAT.search(front_text)
+    if not m:
+        return {"raw": None, "value": None, "iso": None, "span": None}
+    clean = m.group(1).strip()
+    iso = parse_uspto_date_to_iso(clean) if clean else None
+    return {
+        "raw": m.group(0),
+        "value": clean or None,
+        "iso": iso,
+        "span": {"start": m.start(0), "end": m.end(0)},
+    }
+
+
+# "(56) References Cited" often exists even if the actual list is elsewhere in text flow.
+US_PAT_DOCS_HEAD = re.compile(r"^\s*U\.S\.\s*PATENT\s*DOCUMENTS\s*$", re.IGNORECASE | re.MULTILINE)
+REFS_CITED_LABEL_PAT = re.compile(r"\(\s*56\s*\)\s*References\s+Cited\b", re.IGNORECASE)
+REFS_CITED_LABEL_LOOSE_PAT = re.compile(r"\bReferences\s+Cited\b", re.IGNORECASE)
+
+
+# =============================================================================
+# References cited extraction (robust to trailing classification codes)
+# =============================================================================
+
+# Matches patent numbers like:
+#   5,737,072
+#   4,209.257
+#   6,779,386
+# with optional whitespace around separators.
+US_PATENT_GROUPED_PAT = re.compile(r"\b(\d{1,2})\s*[,\.]\s*(\d{3})\s*[,\.]\s*(\d{3})\b")
+
+US_PATENT_DIGITS_PAT = re.compile(r"\b\d{7,8}\b")
+
+
+def extract_cited_us_patents_fulltext(
+    front_text: str, own_patent_digits: Optional[str]
+) -> List[Dict[str, str]]:
+    """
+    Extract cited US patent numbers from the (front page) text.
+
+    Key property: does NOT over-capture trailing USPC/classification codes like
+    '... 356,2374' or '... 382, 149' because it matches only 3-digit groups.
+    """
+    seen = set()
+    out: List[Dict[str, str]] = []
+
+    def add_digits(d: str) -> None:
+        if not d or not d.isdigit():
+            return
+        if len(d) not in (7, 8):
+            return
+        if own_patent_digits and d == own_patent_digits:
+            return
+        if d in seen:
+            return
+        seen.add(d)
+        out.append({"digits": d, "display": comma_format_us_patent(d)})
+
+    text = front_text or ""
+
+    # 1) grouped forms with commas or periods
+    for m in US_PATENT_GROUPED_PAT.finditer(text):
+        digits = f"{m.group(1)}{m.group(2)}{m.group(3)}"
+        add_digits(digits)
+
+    # 2) digits-only forms (sometimes appear without separators)
+    for m in US_PATENT_DIGITS_PAT.finditer(text):
+        add_digits(m.group(0))
+
+    return out
+
+
+# =============================================================================
+# Front page parser (main)
+# =============================================================================
+
+
+def parse_front_page(front_text: str) -> Dict[str, Any]:
+    """
+    Main entry point: parse a cleaned front page text string.
+
+    Returns a dict with:
+      - raw_text
+      - inid_blocks (best-effort)
+      - extracted fields with spans
+      - references_cited with cited_us_patents list
+      - qa diagnostics (warnings + info)
+    """
+    front_text = front_text or ""
+    inid = parse_inid_blocks(front_text)
+
+    qa_warnings: List[str] = []
+    qa_info: Dict[str, Any] = {}
+
+    # Patent header number (raw + normalized)
+    patent_header = None
+    patent_header_span = None
+    mh = PATENT_HEADER_PAT.search(front_text)
+    if mh:
+        patent_header = mh.group(0)
+        patent_header_span = {"start": mh.start(), "end": mh.end()}
+    else:
+        qa_warnings.append("missing_patent_header_number")
+
+    patent_digits = normalize_patent_number_digits(patent_header or "")
+    patent_normalized = normalize_us_patent_header(patent_header or "") if patent_header else None
+    kind_code = None
+    if patent_header:
+        mk = KIND_CODE_PAT.search(patent_header)
+        kind_code = mk.group(1) if mk else None
+
+    if patent_header and not patent_digits:
+        qa_warnings.append("patent_number_digits_not_found")
+
+    # Title
+    title_obj = extract_title_between(front_text)
+    if not title_obj or not title_obj.get("value"):
+        qa_warnings.append("missing_title")
+
+    # Assignee
+    assignee_obj = extract_assignee_clean(inid)
+    if not assignee_obj.get("value"):
+        qa_warnings.append("missing_assignee")
+
+    # Inventors
+    inventors_obj = extract_inventors(front_text, inid)
+    if not inventors_obj.get("parsed"):
+        qa_warnings.append("missing_inventors")
+
+    # Application no
+    appl_obj = extract_application_number(inid)
+    if not appl_obj.get("value"):
+        qa_warnings.append("missing_or_empty_application_number")
+
+    # Filed date
+    filed_obj = extract_filed_date(inid)
+    if filed_obj.get("raw") and not filed_obj.get("iso"):
+        qa_warnings.append("filed_date_unparsed")
+
+    # Grant date
+    grant_obj = extract_grant_date(front_text, inid)
+    if grant_obj.get("raw") and not grant_obj.get("iso"):
+        qa_warnings.append("grant_date_unparsed")
+
+    # Reported counts
+    counts_obj = extract_reported_counts(front_text)
+    if not counts_obj:
+        qa_warnings.append("missing_reported_counts")
+
+    # Abstract (text-only)
+    abstract_obj = extract_abstract(front_text)
+    if not abstract_obj.get("value"):
+        qa_warnings.append("missing_abstract")
+
+    # Front matter span: before abstract heading if present
+    if abstract_obj.get("heading_span"):
+        fm_span = {"start": 0, "end": abstract_obj["heading_span"]["start"]}
+        front_matter = front_text[: fm_span["end"]].strip()
+    else:
+        fm_span = {"start": 0, "end": len(front_text)}
+        front_matter = front_text.strip()
+
+    # References: heading-based (robust for your doc)
+
+    # References (robust)
+    # refs_obj = extract_references_cited(front_text, patent_digits)
+    cited = extract_cited_us_patents_fulltext(front_text, patent_digits)
+    refs_obj = {
+        "raw": None,
+        "span": None,
+        "cited_us_patents": cited,
+        "used_fallback_full_page": True,
+    }
+
+    # QA warning: only if we found a references anchor OR we had to fallback and still found nothing
+    has_refs_anchor = bool(
+        REFS_CITED_LABEL_PAT.search(front_text) or REFS_CITED_LABEL_LOOSE_PAT.search(front_text)
+    )
+    if (has_refs_anchor or refs_obj.get("used_fallback_full_page")) and not refs_obj.get(
+        "cited_us_patents"
+    ):
+        qa_warnings.append("no_cited_us_patents_found")
+
+    # QA info
+    qa_info["inid_codes_found"] = sorted(list(inid.keys()))
+    qa_info["inventor_count"] = len(inventors_obj.get("parsed") or [])
+    qa_info["cited_us_patent_count"] = len(refs_obj.get("cited_us_patents") or [])
+    qa_info["has_us_patent_documents_heading"] = bool(US_PAT_DOCS_HEAD.search(front_text))
+    if counts_obj:
+        qa_info["reported_claim_count"] = counts_obj["reported_claim_count"]
+        qa_info["reported_drawing_sheet_count"] = counts_obj["reported_drawing_sheet_count"]
+
+    return {
+        "raw_text": front_text,
+        "inid_blocks": inid,
+        "qa": {"warnings": qa_warnings, "info": qa_info},
+        "front_matter": front_matter,
+        "front_matter_span": fm_span,
+        "patent_number": {
+            "raw": patent_header,
+            "span": patent_header_span,
+            "digits": patent_digits,
+            "normalized": patent_normalized,  # canonical: no commas/whitespace
+            "kind_code": kind_code,
+        },
+        "title": title_obj or {"value": None, "span": None},
+        "assignee": assignee_obj,  # no notice stored
+        "inventors": inventors_obj,  # includes parsed list
+        "application_no": appl_obj,
+        "filed": filed_obj,
+        "grant_date": grant_obj,
+        "reported_counts": counts_obj,
+        "abstract": abstract_obj,
+        "references_cited": refs_obj,  # includes cited_us_patents
+    }
+
+
+def canonical_front_page(parsed: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Produce a stable, test-friendly projection of parse_front_page() output.
+    """
+    pn = (parsed.get("patent_number") or {}).get("normalized")
+
+    inventors = []
+    inv_parsed = (parsed.get("inventors") or {}).get("parsed") or []
+    for inv in inv_parsed:
+        nm = inv.get("name") or inv.get("raw")
+        if nm:
+            inventors.append(normalize_whitespace_basic(nm))
+
+    cited = (parsed.get("references_cited") or {}).get("cited_us_patents") or []
+    cited_digits = [c["digits"] for c in cited if c.get("digits")]
+
+    counts = parsed.get("reported_counts") or {}
+
+    return {
+        "patent_number_normalized": pn,
+        "title": (parsed.get("title") or {}).get("value"),
+        "assignee": (parsed.get("assignee") or {}).get("value"),
+        "inventors": inventors,
+        "application_no": (parsed.get("application_no") or {}).get("value"),
+        "filed_iso": (parsed.get("filed") or {}).get("iso"),
+        "grant_iso": (parsed.get("grant_date") or {}).get("iso"),
+        "reported_claim_count": counts.get("reported_claim_count"),
+        "reported_drawing_sheet_count": counts.get("reported_drawing_sheet_count"),
+        "cited_us_patents_digits": cited_digits,
+    }
+
+
+# =============================================================================
+# Optional: tiny CLI/test harness (copy/paste usage)
+# =============================================================================
+
+if __name__ == "__main__":
+    # Minimal smoke-test when run directly.
+    # Example:
+    #   python patent_front_page.py /path/to/granted.pdf
+    import sys
+
+    try:
+        from pypdf import PdfReader
+    except Exception:
+        print("pypdf is required for CLI usage. Install with: pip install pypdf")
+        raise
+
+    if len(sys.argv) != 2:
+        print("Usage: python patent_front_page.py <pdf_path>")
+        sys.exit(1)
+
+    pdf_path = sys.argv[1]
+    reader = PdfReader(pdf_path)
+    text0 = extract_page0_text(reader)
+    parsed = parse_front_page(text0)
+
+    # Print a compact summary
+    print("Patent:", (parsed["patent_number"] or {}).get("normalized"))
+    print("Title:", (parsed["title"] or {}).get("value"))
+    print("Assignee:", (parsed["assignee"] or {}).get("value"))
+    inv = parsed["inventors"]["parsed"]
+    print("Inventors:", "; ".join([i.get("name") or "" for i in inv]))
+    print("Appl:", parsed["application_no"]["value"])
+    print("Filed ISO:", parsed["filed"]["iso"])
+    print("Grant ISO:", parsed["grant_date"]["iso"])
+    rc = parsed.get("reported_counts") or {}
+    print("Abstract", parsed["abstract"]["value"])
+    print(
+        "Counts:",
+        rc.get("reported_claim_count"),
+        "claims;",
+        rc.get("reported_drawing_sheet_count"),
+        "drawing sheets",
+    )
+    print("Cited US patents:", len(parsed["references_cited"]["cited_us_patents"]))
+    print("QA warnings:", parsed["qa"]["warnings"])

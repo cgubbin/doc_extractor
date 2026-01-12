@@ -1,0 +1,73 @@
+{
+  "doc_id": "example_submitted",
+  "pdf_path": "./submitted.pdf",
+  "sha256": "bfe62c1eec8f7b391a6bcd0dd0569652958383917a08ce79391e99b8578f29bc",
+  "created_utc": "2026-01-08T14:50:56.403918+00:00",
+  "config": {
+    "pdftotext_path": "pdftotext",
+    "pdfimages_path": "pdfimages",
+    "pdftoppm_path": "pdftoppm",
+    "pdftotext_layout": true,
+    "pdftotext_raw": true,
+    "pdftotext_encoding": "UTF-8",
+    "max_pages_for_render": null,
+    "figure_mode": "auto",
+    "render_dpi": 200,
+    "jpg_quality": 85,
+    "min_claims_expected": 1,
+    "match_threshold": 0.72,
+    "unchanged_threshold": 0.96,
+    "excerpt_window_chars": 600,
+    "max_excerpts_per_section": 25
+  },
+  "logs": {
+    "text": {
+      "command": [
+        "pdftotext",
+        "-layout",
+        "-raw",
+        "-enc",
+        "UTF-8",
+        "./submitted.pdf",
+        "runs/example_submitted/text/raw.txt"
+      ],
+      "stderr": "",
+      "stdout": "",
+      "returncode": 0
+    },
+    "figures": [
+      {
+        "command": [
+          "pdfimages",
+          "-all",
+          "./submitted.pdf",
+          "runs/example_submitted/figures/img"
+        ],
+        "stderr": "",
+        "stdout": "",
+        "returncode": 0,
+        "count": 0
+      },
+      {
+        "command": [
+          "pdftoppm",
+          "-jpeg",
+          "-r",
+          "200",
+          "./submitted.pdf",
+          "runs/example_submitted/figures/page"
+        ],
+        "stderr": "",
+        "stdout": "",
+        "returncode": 0,
+        "count": 9
+      }
+    ],
+    "warnings": []
+  },
+  "warnings": [],
+  "counts": {
+    "figures": 9,
+    "claims": 9
+  }
+}

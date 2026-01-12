@@ -1,0 +1,358 @@
+US007629993B2
+(12) United States Patent (10) Patent No.: US 7,629,993 B2
+Harless et al. (45) Date of Patent: Dec. 8, 2009
+(54) AUTOMATED WAFER DEFECT INSPECTION (56) References Cited
+SYSTEMUSING BACKSIDE LLUMINATION
+(75) Inventors: Mark Harless, Plymouth, MN (US);
+Jeremy Jenum, Plymouth, MN (US);
+Willard Charles Raymond, Plymouth,
+MN (US)
+(73) Assignee: Rudolph Technologies, Inc., Flanders,
+NJ (US)
+(*) Notice: Subject to any disclaimer, the term ofthis
+patent is extended or adjusted under 35
+U.S.C. 154(b) by 372 days.
+(21) Appl. No.: 10/262,173
+(22) Filed: Sep.30, 2002
+(65) Prior Publication Data
+US 2004/OO61779 A1 Apr. 1, 2004
+(51) Int. Cl.
+H04N 9/247 (2006.01)
+(52) U.S. Cl. ......................................... 348/126; 348/76
+(58) Field ofClassification Search ................. 348/125,
+348/126,76; 382/145, 149: 73/105: 356/237.4
+Seeapplication file forcomplete search history.
+U.S. PATENT DOCUMENTS
+3,963,354 A 6, 1976 Feldman et al.
+4,148,065. A 4,1979 Nakagawa et al.
+4,209.257 A 6/1980 Uchiyama etal.
+4,527,070 A 7, 1985 Matsui et al.
+5,095,204 A 3, 1992 Novini
+5,539,514 A * 7/1996 Shishido et al. .......... 356,2374
+5,737,072 A 4/1998 Emeryet al.
+5,892.579 A 4/1999 Elyasafetal.
+6,084,716 A 7/2000 Sanada et al.
+6,324.298 B1 * 1 1/2001 O'Dell et al. ............... 382, 149
+6,779,386 B2 * 8/2004 Neo et al. ..................... 73/105
+* cited by examiner
+Primary Examiner Gims SPhilippe
+(74) Attorney, Agent, or Firm—Dicke, Billig& Czaja, PLLC
+(57) ABSTRACT
+Adefectinspection system forthesemiconductorand micro
+electronics industry. Moreparticularly, thepresent invention
+relatestoanautomateddefectinspectionsystemforwafers or
+other semiconductor or electronic Substrates ofany kind or
+type that are transparent, translucent, opaque or otherwise
+capable ofallowing at least Some light to pass through.
+16 Claims, 4 Drawing Sheets
+U.S. Patent Dec. 8, 2009 Sheet 1 of4 US 7,629,993 B2
+E.
+U.S. Patent Dec. 8, 2009 Sheet 2 of4 US 7,629,993 B2
+U.S. Patent Dec. 8, 2009 Sheet 3 of4 US 7,629,993 B2
+U.S. Patent Dec. 8, 2009 Sheet 4 of4 US 7,629,993 B2
+US 7,629,993 B2
+1.
+AUTOMATED WAFER DEFECT INSPECTION
+SYSTEMUSING BACKSIDE ILLUMINATION
+BACKGROUND OF THE INVENTION
+1. Technical Field
+The present invention relates to defect inspection systems
+forthesemiconductorindustry. Moreparticularly,thepresent
+inventionrelatestoanautomateddefectinspection system for
+wafers orothersemiconductor orelectronic Substrates ofany
+kindortypethataretransparent,opaqueorotherwisecapable
+ofallowing at least some visible light to pass through.
+2. Background Information
+10
+Overthepastseveraldecades,thesemiconductorhasexpo- is
+nentiallygrown in useandpopularity.Thesemiconductorhas
+in effect revolutionized Society by introducing computers,
+electronic advances,andgenerally revolutionizing many pre
+viously difficult,expensive and/ortime consuming mechani
+cal processes into simplistic and quick electronic processes.
+Thisboomin semiconductorshasbeenfueledbyaninsatiable
+desire by business and individuals for computers and elec
+tronics,and moreparticularly, faster, moreadvancedcomput
+ers and electronics whetheritbe on an assembly line, on test
+equipmentinalab, on thepersonal computeratone's desk, or
+in the home electronics and toys.
+25
+The manufacturers of semiconductors have made vast
+improvements inendproductquality, speedandperformance
+as well as in manufacturing process quality, speed and per
+formance. However, therecontinues to be demand forfaster,
+more reliable and higherperforming semiconductors.
+30
+One process that has evolved over the past decade or so is
+the semiconductor inspection process. The merit in inspect
+ing semiconductors throughoutthe manufacturingprocess is
+obvious in that bad wafers may be removed at the various
+steps rather than processed to completion only to find out a
+defectexistseitherbyendinspection orbyfailure duringuse.
+35
+Certain wafersaretransparent, translucent, opaque or oth
+erwisecapableoftransmittinglighttherethrough.Also,some
+silicon (not transparent or opaque) have through holes or
+mask properties that allow visible light to be transmitted
+through certain portions.Thesewafersthataretransparent or
+opaqueare generally made oftype III-V orII-VI compounds
+and include gallium arsenide, indium phosphide, silicon car
+bide, and other non-silicon based substrates. These wafers
+may also be glass or oxide based which includes quartz and
+fused silica compounds.
+40
+45
+Often these transparent or opaque wafers contain features
+on the back side (the side againsttheplate orstage) orinside
+the wafer that it is desirable to inspect. In some scenarios,
+brightfield or darkfield illumination as is disclosed below in
+the incorporated by reference August Technology patent
+applications, is sufficient to illuminatethe wafers forinspec
+tion even where the features are on the backside or inside.
+However,incertainwafers,backsideilluminationisdesirable
+or necessary to betterilluminate the features to be inspected.
+50
+55
+It is this need that the present invention addresses.
+SUMMARY OF THE INVENTION 60
+Specifically, the present invention is an automated method
+ofinspecting a semiconductorwaferor microelectronic Sub
+strate in any form, size and shape where the wafer is trans
+parent, opaque or otherwise capable (such as via holes) of
+transmittingatleast somelighttherethrough wheretheinven
+tion includes abackside illumination system forilluminating
+65
+2
+the wafer or substrate from the backside for inspection from
+the front side offeatures on the back side or within the wafer
+or substrate.
+BRIEF DESCRIPTION OF THE DRAWINGS
+Preferred embodiment ofthe invention, illustrative ofthe
+best mode in which applicanthas contemplatedapplying the
+principles, are set forth in the following description and are
+shown in the drawings and are particularly and distinctly
+pointed out and set forth in the appended claims.
+FIG. 1 is a top perspective view ofone embodiment ofthe
+system;
+FIG. 2 is a bottom perspective view ofthe system ofFIG.
+1;
+FIG.3 isanexplodedassemblyviewofthesystem ofFIGS.
+1-2;
+FIG. 4 is a view ofthe heat sink;
+FIG. 5 is a top view ofthe LED assembly:
+FIG. 6 is a side view ofthe LED assembly; and
+FIG. 7 is a top view ofthe radiator.
+Similar numerals refer to similar parts throughout the
+drawings.
+DETAILED DESCRIPTION OF THE PREFERRED
+EMBODIMENT
+Thepresentinvention isabackside illumination system for
+illuminating the backside of semiconductor or microelec
+tronic wafers or substrates where the wafers or substrates are
+transparent, translucent, opaque or otherwise capable of
+transmitting at least Some of the illumination through the
+waferorsubstrateto illuminatingfeaturestherein, thereonthe
+backside, or associated therewith. This invention is designed
+to be useful with any inspection process, including for
+exampletheautomateddefectinspection system described in
+commonly ownedU.S. ProvisionalApplication Nos. 60/092,
+923 and 60/092,701, filed on Jul. 15, 1998, and U.S. patent
+application Ser. No. 09/352,564, filed on Jul. 13, 1999, all of
+which are hereby incorporated by reference such that the
+backside illumination allows for inspection and viewing of
+the features onthebackside orwithinthewaferfrom the front
+side.
+Thebackside illumination system is indicatedgenerally as
+S as is shown in the Figures. The system includes aheat sink
+1, a light assembly 2, a clamp ring 3, a radiator4, a diffuser
+ring 5, a diffuserglass 6, atop ring 7, a top oropal glass 8, a
+plurality offasteners 9-12, a stop pin 13, a wire cover 14, a
+connectorboardassembly 15,a rotatableairfitting 16, a base
+17, a hardstop 18,asensormountbracket 19,ahardstop back
+20, anda power wire assembly 21.
+Heat sink 1 is preferably an aluminum heat sink for dissi
+pating heat from the backside illumination system and spe
+cifically the light assembly. The heat sink 1 in the preferred
+embodiment includes a center hole for receiving the light
+assembly where the light assembly seats on a ledge therein.
+Light assembly 2 is any form oflight for illumination. In
+the preferred embodiment, the light assembly 2 is a LED
+assembly including a plurality of LEDs or light emitting
+diodes. In this preferred design, the LEDs are arranged in a
+circular array format as is shown in the Figures whereby the
+LEDs are arranged to maximize the numberprovided.
+Clamp ring 3 is a ring for securing or clamping the light
+assembly 2 to theheatsink1.Thelightassembly is seatedon
+the ledgein theheat sinkand then the clamp ringsecures it in
+place.
+US 7,629,993 B2
+3
+Radiator 4 is designed to radiate heat away from the light
+assembly. The light assembly when embodied as an LED
+assembly with tens, hundreds, or even thousands of LEDs
+creates significant heat. The heat sink functions to dissipate
+the heat away from the LED assembly. The radiator in turn
+functions to radiate this heat to the atmosphere. As a result,
+theradiatorneedstobeofa radialfin designasisshowninthe
+Figuressoastoprovide maximum Surfaceareato bestradiate
+offthe significant heat created by the LED assembly.
+Diffuserglass 6andthediffuserring5thatsecurestheglass
+in the radiator4are provided to diffuse the LED light radiat
+ing from the LEDs into a more even or diffuse pattern.
+Top glass 8 and the top ring 7 that secures the glass in the
+radiatorareprovidedas atop surface. Itis on this surfacethat
+the wafers are inspected.
+The system S provides illumination on the back side ofa
+wafer or Substrate while sitting on an inspection plate or
+stage. Otherillumination suchas brightfieldordarkfield may
+also be provided. This backside illumination provides high
+intensity visible light that illuminates through either (1) a
+silicon waferorSubstrate with lightpassagestherein, or(2) a
+non-siliconwaferorSubstratemadeofglass oratype III-V or
+II-VI compoundSuchasgalliumarsenide,indium phosphide,
+silicon carbide, or oxide based materials which includes
+quartz and fused silica compounds. This allows for viewing
+fromthetoporfrontsideoffeatureson thebacksideorwithin
+the wafer or substrate.
+Accordingly, the invention as described above and under
+stood by one of skill in the art is simplified, provides an
+effective, safe, inexpensive, and efficient device, system and
+process which achieves all the enumerated objectives, pro
+vides for eliminating difficulties encountered with prior
+devices, systems and processes, and solves problems and
+obtains new results in the art.
+In the foregoing description, certain terms havebeen used
+forbrevity, clearness and understanding; but no unnecessary
+limitations are to be implied therefrom beyond the require
+mentofthepriorart,becauseSuchtermsare usedfordescrip
+tive purposes and are intended to be broadly construed.
+Moreover, the invention'sdescriptionandillustration is by
+way ofexample,andtheinvention’sscopeis notlimitedtothe
+exact details shown or described.
+Having now described the features, discoveries and prin
+ciples ofthe invention, the mannerin which it is constructed
+and used, the characteristics of the construction, and the
+advantageous, new and useful results obtained; the new and
+useful structures, devices, elements, arrangements, parts and
+combinations, are set forth in the appended claims.
+What is claimed is:
+1.An inspectionsystem forinspectingorviewingwafersor
+Substrates, the inspection system comprising:
+abackside illumination system definingatop Surface from
+which illumination is directed to wafers or substrates
+being viewed or inspected, the wafers orsubstrates hav
+ing a top side and a back side, the back side on the top
+Surface;
+a radiator provided with the backside illumination system
+and including a plurality ofradially projecting fins, the
+radiator for radiating heat generated by the backside
+illumination system to an atmosphere; and
+a camera for viewing or inspecting Such wafers or Sub
+strates, the camera positioned above the top surface of
+thebacksideilluminationsystem to receiveillumination
+provided from the top surface through the waferor sub
+Strate.
+5
+10
+15
+25
+30
+35
+40
+45
+50
+55
+60
+65
+4
+2. The inspection system ofclaim 1, wherein the radiator
+has a central aperture and the backside illumination system
+further comprises:
+a light assembly for generating the illumination, the light
+assembly secured relative to the radiator such that the
+illumination is directed through the central aperture.
+3. The inspection system ofclaim 1, wherein the backside
+illumination system further comprises:
+a top glass defining at least a portion ofthe top Surface of
+backside illumination system, the top glass secured in
+the central aperture ofthe radiator.
+4. The inspection system ofclaim 3, wherein the backside
+illumination system is configured to Support the wafers or
+Substrates to be viewed or inspected on the top glass.
+5. An inspection for inspecting or viewing wafers or Sub
+strates, the inspection system comprising:
+abackside illumination system definingatop surface from
+which illumination is directed to wafers or substrates
+being viewedorinspected, the wafers orsubstrates hav
+ing a top side and a back side, the back side on the top
+Surface, the backside illumination system including:
+a lightassembly that generates lightand heat when illu
+minating; and
+aheatsinkfor dissipatingtheheatfromthelightassem
+bly,theheatsinkhavingacenterholeforreceivingthe
+light assembly;
+wherein the light assembly is seated in the centerhole;
+and
+a camera for viewing or inspecting Such wafers or Sub
+strates,thecamerapositionedabovethetop surfaceof
+the backside illumination system to receive illumina
+tion provided from the top surface through the wafer
+or substrate.
+6. The inspection system of claim 5, wherein the light
+assembly is an LED assembly includinga plurality ofLEDs.
+7. The inspection system ofclaim 6, wherein the plurality
+ofLEDs are arranged in a circulararray format.
+8. The inspection system ofclaim 5, wherein the heat sink
+is Substantially annular in shape.
+9. The inspection system ofclaim 5, wherein the backside
+illumination system further comprises:
+a radiator including a plurality ofradially projecting fins,
+the radiator mounted to the heat sink.
+10.The inspection system ofclaim 9, wherein the radiator
+includes a central aperture coaxially aligned with the center
+holeoftheheatsink such thatlightfrom the lightassembly is
+transmitted through the central aperture.
+11. The inspection system ofclaim 10, wherein the back
+side illumination system furthercomprises:
+a diffuserglass secured inthecentralapertureofthe radia
+tor to diffuse light from the light assembly.
+12.A methodofinspectingorviewingwafersorSubstrates,
+the method comprising:
+providing an illumination system defining a top surface
+from which illumination is provided;
+supportinga wafer or substrate with the top surfaceofthe
+illumination system, the wafer orSubstrate havinga top
+side and a back side;
+illuminating the back side ofthe wafer or substrate with
+illumination from the illumination system;
+providing a camera; and
+receiving the illumination from the illumination system
+from the top surface ofthe waferwith the camera;
+wherein the waferorsubstrate is substantially free oflight
+passages,thewaferorSubstrateis formed ofat leastone
+of a glass, a type II-V compound, a type II-VI com
+pound, and an oxide-based material.
+US 7,629,993 B2
+5 6
+13.The methodofclaim 12, whereinthewaferorsubstrate 16.The method ofclaim 12, wherein receiving the illumi
+transmits high-intensity, visible light. nationfrom theillumination system withthecameraincludes
+14.The methodofclaim 12, whereinthewaferorsubstrate viewing or inspecting features within the wafer or Substrate
+has light passages therein with the camera usingthe illumination from the illumination
+5 system.
+15.The methodofclaim 12, whereintheillumination from
+the illumination system is high-intensity, visible light. k . . . .
+UNITED STATES PATENT AND TRADEMARK OFFICE
+CERTIFICATE OF CORRECTION
+PATENT NO. : 7,629,993 B2 Page 1 of 1
+APPLICATION NO. : 10/262173
+DATED : December 8, 2009
+INVENTOR(S) : Harless et al.
+It is certified that error appears in the above-identified patent and that said Letters Patent is hereby corrected as shown below:
+On the Title Page:
+The first or sole Notice should read --
+Subjecttoanydisclaimer,theterm ofthispatentisextendedoradjusted under35 U.S.C. 154(b)
+by 2125 days.
+Signed and Sealed this
+Second Day ofNovember, 2010
+David J. Kappos
+Director ofthe UnitedStates Patent and Trademark Office

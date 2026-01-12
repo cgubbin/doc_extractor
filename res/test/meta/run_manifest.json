@@ -1,0 +1,66 @@
+{
+  "doc_id": "test",
+  "pdf_path": "src/submitted.pdf",
+  "sha256": "bfe62c1eec8f7b391a6bcd0dd0569652958383917a08ce79391e99b8578f29bc",
+  "created_utc": "2026-01-08T15:18:06.707124+00:00",
+  "config": {
+    "pdftotext_path": "pdftotext",
+    "pdftoppm_path": "pdftoppm",
+    "pdfinfo_path": "pdfinfo",
+    "pdftotext_layout": true,
+    "pdftotext_raw": true,
+    "pdftotext_encoding": "UTF-8",
+    "render_dpi": 220,
+    "figure_select_min_image_coverage": 0.18,
+    "figure_select_min_edge_density": 0.015,
+    "figure_select_max_pages": null,
+    "min_claims_expected": 1,
+    "match_threshold": 0.72,
+    "unchanged_threshold": 0.96,
+    "excerpt_window_chars": 600,
+    "max_excerpts_per_section": 25
+  },
+  "logs": {
+    "text": {
+      "command": [
+        "pdftotext",
+        "-layout",
+        "-raw",
+        "-enc",
+        "UTF-8",
+        "src/submitted.pdf",
+        "res/test/text/raw.txt"
+      ],
+      "stderr": "",
+      "stdout": "",
+      "returncode": 0
+    },
+    "render_pages": {
+      "command": [
+        "pdftoppm",
+        "-jpeg",
+        "-r",
+        "220",
+        "src/submitted.pdf",
+        "res/test/figures/pages/page"
+      ],
+      "stderr": "",
+      "stdout": "",
+      "returncode": 0,
+      "count": 9
+    },
+    "figure_select": {
+      "selected": 1,
+      "paths": [
+        "res/test/figures/selected/figure_page-2.jpg"
+      ]
+    },
+    "warnings": []
+  },
+  "warnings": [],
+  "counts": {
+    "rendered_pages": 9,
+    "selected_fig_pages": 1,
+    "claims": 16
+  }
+}
