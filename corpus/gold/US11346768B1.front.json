@@ -1,0 +1,49 @@
+{
+    "patent_number_normalized": "US11346768B1",
+    "title": "VORTEX POLARIMETER",
+    "assignee": "Onto Innovation Inc., Wilmington, MA",
+    "inventors": [
+        "Kenneth E. James, Morgan Hill, CA",
+        "John F. Lesoine, San Jose, CA",
+        "Pedro Vagos, Chennevieres"
+    ],
+    "application_no": "17/110,214",
+    "filed_iso": "2020-12-02",
+    "grant_iso": "2022-05-31",
+    "reported_claim_count": 20,
+    "reported_drawing_sheet_count": 17,
+    "cited_us_patents_digits": [
+        "3874797",
+        "4306809",
+        "6693711",
+        "6927888",
+        "7064828",
+        "7812963",
+        "7978408",
+        "8427645",
+        "8456632",
+        "8908180",
+        "9389349",
+        "9793178",
+        "10921255",
+        "10955331",
+        "11067450"
+    ],
+    "cited_us_publications": [
+        "20040012853",
+        "20060023987",
+        "20060164626",
+        "20090040610",
+        "20110102793",
+        "20110292402",
+        "20120069320",
+        "20120140235",
+        "20120268812",
+        "20150219497",
+        "20160313185",
+        "20180073862",
+        "20200025678",
+        "20210349324"
+    ],
+    "front_matter_pages_to_scan": 2
+}

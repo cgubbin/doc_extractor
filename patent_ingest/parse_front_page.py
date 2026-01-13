@@ -31,6 +31,8 @@ import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from patent_ingest.two_column import extract_page_text_two_column
+
 
 # =============================================================================
 # Cleaning helpers (front page)
@@ -85,10 +87,10 @@ def normalize_punctuation_spacing(s: str) -> str:
     t = re.sub(r"\s+", " ", t).strip()
 
     # Remove spaces before common punctuation
-    t = re.sub(r"\s+([,.;:)])", r"\1", t)
+    t = re.sub(r"\s+([,.;:)-])", r"\1", t)
 
     # Remove spaces after brackets
-    t = re.sub(r"([(])\s*", r"\1", t)
+    t = re.sub(r"([(-])\s*", r"\1", t)
 
     # Ensure a single space after punctuation when appropriate
     # (Avoid touching decimals/abbreviations too aggressively.)
@@ -111,8 +113,9 @@ def extract_page0_text(pdf_reader: Any) -> str:
     """
     Extract and clean page 0 text from a pypdf PdfReader.
     """
-    page0 = pdf_reader.pages[0]
-    t = page0.extract_text() or ""
+    # page0 = pdf_reader.pages[0]
+    # t = page0.extract_text() or ""
+    t = extract_page_text_two_column(pdf_reader, 0) or ""
     t = dehyphenate(t)
     t = strip_front_page_noise(t)
     t = normalize_whitespace(t)
@@ -124,8 +127,9 @@ def extract_page_text(pdf_reader: Any, page_index: int, *, is_front_page: bool =
     Extract and clean a page from a pypdf PdfReader.
     For now, use the same cleaning approach; callers may add body-specific stripping later.
     """
-    page = pdf_reader.pages[page_index]
-    t = page.extract_text() or ""
+    # page = pdf_reader.pages[page_index]
+    # t = page.extract_text() or ""
+    t = extract_page_text_two_column(pdf_reader, page_index) or ""
     t = dehyphenate(t)
     if is_front_page or page_index == 0:
         t = strip_front_page_noise(t)
@@ -331,51 +335,99 @@ def extract_abstract(front_text: str) -> Dict[str, Any]:
 # Title extraction robust to (56) intrusion
 # =============================================================================
 
-REF_CITED_LABEL_PAT = re.compile(r"\(\s*56\s*\)\s*References\s+Cited", re.IGNORECASE)
+# Markers that definitely start a new metadata block and cannot be part of a title
+TITLE_HARD_END_INID_PAT = re.compile(
+    r"\(\s*(?:71|72|73|74|75|21|22|45|57)\s*\)",  # common INIDs after title
+    re.IGNORECASE,
+)
+
+# Phrases that indicate the references/table area; title must not include these
+TITLE_TABLE_STOP_PAT = re.compile(
+    r"\b("
+    r"U\.S\.\s*PATENT\s*DOCUMENTS|"
+    r"FOREIGN\s+PATENT\s+DOCUMENTS|"
+    r"OTHER\s+PUBLICATIONS"
+    r")\b",
+    re.IGNORECASE,
+)
+
+# Remove only the interleaved (56) references label inside the title
+INTERLEAVED_REFS_PAT = re.compile(r"\(\s*56\s*\)\s*References\s*Cited\b", re.IGNORECASE)
+US_PATENT_DOCS_PAT = re.compile(r"\s*U\s*\.\s*S\s*\.\s*PATENT\s*DOCUMENTS", re.IGNORECASE)
+BARE_REFS_CITED_PAT = re.compile(r"\bReferences\s+Cited\b", re.IGNORECASE)
+
+# If (71) is printed as "(71) Applicant:" on some docs, we want to stop at "(71)" regardless.
+# If your stream sometimes loses parentheses, you can also stop on the word "Applicant:"
+TITLE_APPLICANT_WORD_PAT = re.compile(r"\bApplicant\s*:", re.IGNORECASE)
+
+
+def _find_span_end_after_54(front_text: str, start: int) -> int:
+    """
+    Initial broad window: prefer (75) then (57) then end-of-page.
+    This window is not the final title; we will cut it down with internal stop rules.
+    """
+    candidates = []
+    for pat in (
+        re.compile(r"\(\s*75\s*\)", re.IGNORECASE),
+        re.compile(r"\(\s*57\s*\)\s*ABSTRACT\b", re.IGNORECASE),
+    ):
+        m = pat.search(front_text, pos=start)
+        if m:
+            candidates.append(m.start())
+    return min(candidates) if candidates else len(front_text)
 
 
 def extract_title_between(front_text: str) -> Optional[Dict[str, Any]]:
-    """
-    Robust title extraction:
-    - Start after "(54)"
-    - End at "(75)" if present, else at next INID marker
-    - Remove embedded "(56) References Cited" label if it appears inside the title span
-    - Normalize whitespace to a single line
-    """
-    m54 = re.search(r"\(\s*54\s*\)", front_text or "")
+    front_text = front_text or ""
+    m54 = re.search(r"\(\s*54\s*\)", front_text)
     if not m54:
         return None
 
-    m75 = re.search(r"\(\s*75\s*\)", front_text or "")
-    if m75 and m75.start() > m54.end():
-        end = m75.start()
-    else:
-        mnext = INID_MARKER_PAT.search(front_text or "", pos=m54.end())
-        end = mnext.start() if mnext else len(front_text)
+    start = m54.end()
+    broad_end = _find_span_end_after_54(front_text, start)
+    raw = front_text[start:broad_end]
 
-    raw_span_text = front_text[m54.end() : end]
-    cleaned = REF_CITED_LABEL_PAT.sub("", raw_span_text)
-    cleaned = normalize_whitespace_basic(cleaned) or None
+    # 1) Delete interleaved "(56) References Cited" tokens inline (do NOT treat as a hard stop)
+    raw = INTERLEAVED_REFS_PAT.sub(" ", raw)
+    raw = BARE_REFS_CITED_PAT.sub(" ", raw)
+    raw = US_PATENT_DOCS_PAT.sub(" ", raw)
 
-    return {"value": cleaned, "span": {"start": m54.end(), "end": end}}
+    # 2) Now find the earliest hard stop inside the remaining span:
+    #    - any later INID block start (71/72/73/74/75/21/22/45/57)
+    #    - table headings like "U.S. PATENT DOCUMENTS"
+    #    - "Applicant:" word (in case parentheses are mangled)
+    stop_positions = []
+
+    m_inid = TITLE_HARD_END_INID_PAT.search(raw)
+    if m_inid:
+        stop_positions.append(m_inid.start())
+
+    m_tbl = TITLE_TABLE_STOP_PAT.search(raw)
+    if m_tbl:
+        stop_positions.append(m_tbl.start())
+
+    m_app = TITLE_APPLICANT_WORD_PAT.search(raw)
+    if m_app:
+        stop_positions.append(m_app.start())
+
+    if stop_positions:
+        raw = raw[: min(stop_positions)]
+
+    # 3) Remove any stray INID markers that remain (rare)
+    raw = re.sub(r"\(\s*\d{2}\s*\)", " ", raw)
+
+    cleaned = normalize_punctuation_spacing(normalize_whitespace_basic(raw))
+    return {"value": cleaned or None, "span": {"start": start, "end": broad_end}}
 
 
 # =============================================================================
 # Assignee extraction (clean; no notice/disclaimer stored)
 # =============================================================================
 
-# Stop at common boilerplate markers including PTA/disclaimer language.
-ASSIGNEE_STOP_PAT = re.compile(
-    r"(\(\*\)|\*|\bNotice\b\s*[:\-]|"
-    r"\bSubject\s+to\s+any\s+disclaimer\b|"
-    r"\bpatent\s+is\s+extended\s+or\s+adjusted\b)",
-    re.IGNORECASE,
-)
-
 ASSIGNEE_HEADING_STOP_PAT = re.compile(
     r"\b("
     r"FOREIGN\s+PATENT\s+DOCUMENTS|"
-    r"U\.S\.\s*PATENT\s+DOCUMENTS|"
+    r"U\.S\.\s*PATENT\s*DOCUMENTS|"
     r"OTHER\s+PUBLICATIONS|"
     r"REFERENCES\s+CITED|"
     r"ABSTRACT|"
@@ -385,7 +437,32 @@ ASSIGNEE_HEADING_STOP_PAT = re.compile(
     re.IGNORECASE,
 )
 
-COUNTRY_TAG_PAT = re.compile(r"\(\s*[A-Z]{2}\s*\)\s*$")  # e.g., "(US)" at end
+ASSIGNEE_STOP_PAT = re.compile(
+    r"(\(\*\)|\*|\bNotice\b\s*[:\-]|"
+    r"\bSubject\s+to\s+any\s+disclaimer\b|"
+    r"\bpatent\s+is\s+extended\s+or\s+adjusted\b)",
+    re.IGNORECASE,
+)
+
+ASSIGNEE_FOREIGN_REF_STOP_PAT = re.compile(
+    r"\b(EP|WO|PCT|KR|JP|CN|DE|FR|GB|CA|TW|RU|BR|IN|AU|IT|ES|NL|SE|CH)\b\s*[-A-Z0-9]",
+    re.IGNORECASE,
+)
+
+ASSIGNEE_CONTINUED_PAT = re.compile(r"\bContinued\b|\(\s*Continued\s*\)", re.IGNORECASE)
+
+COUNTRY_TAG_PAT = re.compile(r"\(\s*[A-Z]{2}\s*\)\s*$")  # (US) at end
+
+
+def _cut_at_earliest(s: str, patterns: List[re.Pattern]) -> str:
+    if not s:
+        return s
+    stops = []
+    for pat in patterns:
+        m = pat.search(s)
+        if m:
+            stops.append(m.start())
+    return s[: min(stops)].strip() if stops else s.strip()
 
 
 def extract_assignee_clean(inid_blocks: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
@@ -401,26 +478,26 @@ def extract_assignee_clean(inid_blocks: Dict[str, Dict[str, Any]]) -> Dict[str, 
         return {"raw": None, "value": None, "span": None}
 
     raw2 = strip_leading_label(raw, ["Assignee", "Assignees", "Assignee:"])
-    raw2 = raw2.strip()
+    raw2 = normalize_punctuation_spacing(raw2).strip()
 
-    # 1) Stop at front-matter headings
-    m_h = ASSIGNEE_HEADING_STOP_PAT.search(raw2)
-    if m_h:
-        raw2 = raw2[: m_h.start()].strip()
+    # 1) Cut at headings / refs / boilerplate (this removes "FOREIGN PATENT DOCUMENTS")
+    raw2 = _cut_at_earliest(
+        raw2,
+        [
+            ASSIGNEE_HEADING_STOP_PAT,
+            ASSIGNEE_FOREIGN_REF_STOP_PAT,
+            ASSIGNEE_CONTINUED_PAT,
+            ASSIGNEE_STOP_PAT,
+        ],
+    )
 
-    # 2) Stop at PTA / notice boilerplate
-    m_b = ASSIGNEE_STOP_PAT.search(raw2)
-    if m_b:
-        raw2 = raw2[: m_b.start()].strip()
+    # 2) Strip trailing country tag LAST
+    raw2 = COUNTRY_TAG_PAT.sub("", raw2).strip()
 
-    # 3) Finally strip a dangling country tag like "(US)"
-    raw2 = normalize_punctuation_spacing(COUNTRY_TAG_PAT.sub("", raw2).strip())
+    # 3) Final tidy
+    raw2 = raw2.rstrip(" ,;.")
 
-    return {
-        "raw": raw,
-        "value": raw2 or None,
-        "span": span,
-    }
+    return {"raw": raw, "value": raw2 or None, "span": span}
 
 
 # =============================================================================
@@ -485,6 +562,35 @@ INVENTORS_STRAY_LABEL_PAT = re.compile(
 )
 
 
+INVENTOR_HEADING_STOP_PAT = re.compile(
+    r"\b("
+    r"U\.S\.\s*PATENT\s*DOCUMENTS|"
+    r"FOREIGN\s+PATENT\s+DOCUMENTS|"
+    r"OTHER\s+PUBLICATIONS|"
+    r"REFERENCES\s+CITED|"
+    r"ABSTRACT|"
+    r"Primary\s+Examiner|"
+    r"Assistant\s+Examiner"
+    r")\b",
+    re.IGNORECASE,
+)
+
+# Very characteristic of refs-table lines: "1/1999 Jordan, III et al."
+REFS_DATE_LINE_PAT = re.compile(
+    r"\b\d{1,2}\s*/\s*\d{4}\b",  # month/year
+    re.IGNORECASE,
+)
+
+# Country tag immediately followed by a refs-date is a strong boundary:
+# "(US) 1/1999 Jordan, III et al."
+COUNTRY_TAG_THEN_REFS_DATE_PAT = re.compile(
+    r"\(\s*[A-Z]{2}\s*\)\s*\d{1,2}\s*/\s*\d{4}\b",
+    re.IGNORECASE,
+)
+
+COUNTRY_TAG_PAT = re.compile(r"\(\s*[A-Z]{2}\s*\)\s*$")
+
+
 def extract_inventors(front_text: str, inid_blocks: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
     """
     Inventors may appear under:
@@ -506,10 +612,32 @@ def extract_inventors(front_text: str, inid_blocks: Dict[str, Dict[str, Any]]) -
         span = {"start": m.start(1), "end": m.end(1)}
 
     raw = strip_leading_label(raw, ["Inventors", "Inventor"])
-    # NEW: remove common contamination caused by column interleaving
+    raw = raw.strip()
+
+    # 1) Stop at obvious headings (best)
+    m_h = INVENTOR_HEADING_STOP_PAT.search(raw)
+    if m_h:
+        raw = raw[: m_h.start()].strip()
+
+    # 2) Stop at the very strong boundary "(US) 1/1999"
+    m_bd = COUNTRY_TAG_THEN_REFS_DATE_PAT.search(raw)
+    if m_bd:
+        raw = raw[: m_bd.start()].strip()
+
+    # 3) If we still see refs-like month/year dates, cut at the first one
+    # (This is safe because inventor entries virtually never contain "1/1999".)
+    m_d = REFS_DATE_LINE_PAT.search(raw)
+    if m_d:
+        raw = raw[: m_d.start()].strip()
+
+    # 4) Finally strip a dangling country tag like "(US)"
+    raw = COUNTRY_TAG_PAT.sub("", raw).strip()
+
+    # 5) Existing removal of interleaved "Inventors:" headers if you already added it
     raw = INVENTORS_EMBEDDED_HEADER_PAT.sub("", raw).strip()
     raw = INVENTORS_STRAY_LABEL_PAT.sub("", raw).strip()
     raw = INVENTORS_TRAILING_HEADER_PAT.sub("", raw).strip()
+
     parsed = parse_inventors(raw)
     return {"raw": raw, "value": raw, "span": span, "parsed": parsed}
 
@@ -626,7 +754,7 @@ def extract_grant_date(front_text: str, inid_blocks: Dict[str, Dict[str, Any]]) 
     span = inid_blocks.get("45", {}).get("span")
 
     if raw:
-        clean = strip_leading_label(raw, ["Date of Patent", "Date of Patent:"])
+        clean = strip_leading_label(raw, ["Date of Patent", "Date of Patent:", "Date of Patent :"])
         clean = clean or None
         iso = parse_uspto_date_to_iso(clean) if clean else None
         if iso:
@@ -636,8 +764,7 @@ def extract_grant_date(front_text: str, inid_blocks: Dict[str, Dict[str, Any]]) 
     m = DATE_OF_PATENT_FALLBACK_PAT.search(front_text or "")
     if m:
         clean = m.group(1).strip()
-        normalized = "".join(clean.split())
-        iso = parse_uspto_date_to_iso(normalized) if normalized else None
+        iso = parse_uspto_date_to_iso(clean) if clean else None
         return {"raw": raw, "value": clean, "iso": iso, "span": span}
 
     # fallback to first date in the front text
@@ -723,18 +850,6 @@ US_PATENT_GROUPED_PAT = re.compile(r"\b(\d{1,2})\s*[,\.]\s*(\d{3})\s*[,\.]\s*(\d
 #   2003. O165178 A1
 #   2004/O112863 A1
 #   2007/0293,052 A1
-# US_PUB_APP_PAT = re.compile(
-#     r"""
-#     \b((?:19|20)\d{2})              # year
-#     \s*[/\.]\s*                     # separator: / or .  (after normalization)
-#     ([0-9O][0-9O,\s\.]{5,12})       # serial-ish (may contain commas/spaces/dots; may have O)
-#     \s*
-#     (A\d|A9|B\d)                    # kind code REQUIRED
-#     \s*[*†]?\b                      # optional star/dagger
-#     """,
-#     re.IGNORECASE | re.VERBOSE,
-# )
-#
 US_PUB_APP_PAT = re.compile(
     r"""
     \b((?:19|20)\d{2})                         # year
@@ -851,68 +966,284 @@ def normalize_kindcode_date_runins(text: str) -> str:
     )
 
 
-def extract_references_region(pages_text: List[str], *, max_pages: int = 3) -> Dict[str, Any]:
-    """
-    Extract references text by region:
-      - locate the first page containing (56) References Cited (usually page 0)
-      - include that slice
-      - if continuation is detected, include subsequent pages (up to max_pages)
-        that look like references continuations.
+REFS_START_PAT = re.compile(r"\(\s*56\s*\)\s*References\s+Cited", re.IGNORECASE)
+ABSTRACT_PAT = re.compile(r"\(\s*57\s*\)\s*ABSTRACT", re.IGNORECASE)
 
-    This prevents contamination by "Prior Publication Data" outside the (56) region.
+REFS_EVIDENCE_PAT = re.compile(
+    r"\b(U\.S\.\s*PATENT\s*DOCUMENTS|FOREIGN\s+PATENT\s+DOCUMENTS|OTHER\s+PUBLICATIONS|\(\s*56\s*\)\s*References\s+Cited)\b",
+    re.IGNORECASE,
+)
+
+# Evidence patterns that indicate the page contains citation rows even if headings are missing
+US_GRANT_EVIDENCE_PAT = re.compile(r"\b\d{1,2}\s*[,\.]\s*\d{3}\s*[,\.]\s*\d{3}\b")
+US_PUB_EVIDENCE_PAT = re.compile(
+    r"\b(?:19|20)\d{2}\s*[/\.\u2044\u2215\uFF0F]\s*[0-9O][0-9O,\s\.]{5,12}\s*A\d", re.IGNORECASE
+)
+
+
+RELATED_APP_HEAD_PAT = re.compile(r"\bRelated\s+U\.S\.\s+Application\s+Data\b", re.IGNORECASE)
+PRIMARY_EXAMINER_PAT = re.compile(r"\bPrimary\s+Examiner\b", re.IGNORECASE)
+
+
+# def strip_related_application_data_block(text: str) -> str:
+#     """
+#     Remove the 'Related U.S. Application Data' section, which can include 'now Pat. No. ...'
+#     and must not contaminate (56) citations.
+#     """
+#     if not text:
+#         return ""
+#     m = RELATED_APP_HEAD_PAT.search(text)
+#     if not m:
+#         return text
+#
+#     start = m.start()
+#     # Typically ends before 'Primary Examiner' on the front matter page.
+#     m_end = PRIMARY_EXAMINER_PAT.search(text, m.end())
+#     if m_end:
+#         end = m_end.start()
+#         return (text[:start] + "\n" + text[end:]).strip()
+#
+#     # Fallback: if there is a (56) later, remove up to that first (56)
+#     m56 = REFS_START_PAT.search(text, m.end())
+#     if m56:
+#         end = m56.start()
+#         return (text[:start] + "\n" + text[end:]).strip()
+#
+#     # If we can't find a safe end marker, leave text unchanged (better to keep refs than over-delete)
+#     return text
+#
+#
+# def extract_references_region(pages_text: List[str], *, max_pages: int = 3) -> Dict[str, Any]:
+#     if not pages_text:
+#         return {"raw": "", "pages_used": []}
+#
+#     limit = min(len(pages_text), max_pages)
+#     pages_used: List[int] = []
+#     chunks: List[str] = []
+#
+#     # --- Page 0: strict slice from (56) to (57) ABSTRACT ---
+#     p0 = pages_text[0] or ""
+#     m0 = REFS_START_PAT.search(p0)
+#     if not m0:
+#         return {"raw": "", "pages_used": []}
+#
+#     start0 = m0.start()
+#     end0 = len(p0)
+#     m_abs = ABSTRACT_PAT.search(p0)
+#     if m_abs and m_abs.start() > start0:
+#         end0 = m_abs.start()
+#     chunks.append(p0[start0:end0].strip())
+#     pages_used.append(0)
+#
+#     # --- Continuation pages: include whole page if it has refs evidence, but strip Related App Data ---
+# for i in range(1, limit):
+#     pi = pages_text[i] or ""
+#     if not pi.strip():
+#         continue
+#
+#     # Strip related-app section to prevent "now Pat. No." contamination (US9587932B2 case)
+#     pi2 = strip_related_application_data_block(pi)
+#
+#     has_heading = bool(REFS_EVIDENCE_PAT.search(pi2))
+#     has_numbers = bool(US_GRANT_EVIDENCE_PAT.search(pi2) or US_PUB_EVIDENCE_PAT.search(pi2))
+#
+#     if has_heading or has_numbers:
+#         chunks.append(pi2.strip())
+#         pages_used.append(i)
+#
+# return {"raw": "\n\n".join(chunks).strip(), "pages_used": pages_used}
+
+
+# More tolerant: allow newlines and weird spacing between tokens
+REFS_START_PAT = re.compile(r"\(\s*56\s*\)\s*References\s*Cited", re.IGNORECASE)
+REFS_WORDS_PAT = re.compile(r"\bReferences\s*Cited\b", re.IGNORECASE)
+
+US_PAT_DOCS_PAT = re.compile(r"\bU\.S\.\s*PATENT\s*DOCUMENTS\b", re.IGNORECASE)
+FOREIGN_PAT_DOCS_PAT = re.compile(r"\bFOREIGN\s+PATENT\s+DOCUMENTS\b", re.IGNORECASE)
+OTHER_PUBS_PAT = re.compile(r"\bOTHER\s+PUBLICATIONS\b", re.IGNORECASE)
+
+ABSTRACT_PAT = re.compile(r"\(\s*57\s*\)\s*ABSTRACT\b", re.IGNORECASE)
+
+# Evidence for continuation pages
+REFS_EVIDENCE_PAT = re.compile(
+    r"\b(U\.S\.\s*PATENT\s*DOCUMENTS|FOREIGN\s+PATENT\s+DOCUMENTS|OTHER\s+PUBLICATIONS|\(\s*56\s*\)\s*References\s+Cited|References\s+Cited)\b",
+    re.IGNORECASE,
+)
+US_GRANT_EVIDENCE_PAT = re.compile(
+    r"\b\d{1,2}\s*[,\.]\s*\d{3}\s*[,\.]\s*\d{3}\b"
+)  # e.g., 5,864,394
+US_PUB_EVIDENCE_PAT = re.compile(
+    r"\b(?:19|20)\d{2}\s*[/\.\u2044\u2215\uFF0F]\s*[0-9O][0-9O,\s\.]{5,12}\s*A\d", re.IGNORECASE
+)
+
+RELATED_APP_HEAD_PAT = re.compile(r"\bRelated\s+U\.S\.\s+Application\s+Data\b", re.IGNORECASE)
+
+# These are reasonable “end of related-app block” anchors on front-matter pages
+RELATED_APP_END_PAT = re.compile(
+    r"\b("
+    r"\(\s*56\s*\)\s*References\s+Cited|"
+    r"References\s+Cited|"
+    r"U\.S\.\s*PATENT\s*DOCUMENTS|"
+    r"FOREIGN\s+PATENT\s+DOCUMENTS|"
+    r"OTHER\s+PUBLICATIONS|"
+    r"Primary\s+Examiner|"
+    r"\(\s*57\s*\)\s*ABSTRACT"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def strip_related_application_data_block(text: str) -> str:
     """
+    Remove the 'Related U.S. Application Data' paragraph(s) only.
+    Keep the remainder of the page because (56) tables may appear later.
+    """
+    if not text:
+        return ""
+    m = RELATED_APP_HEAD_PAT.search(text)
+    if not m:
+        return text
+
+    start = m.start()
+    m_end = RELATED_APP_END_PAT.search(text, m.end())
+    if not m_end:
+        # If we cannot find a safe end marker, remove just a bounded chunk (failsafe)
+        # up to 1200 chars to avoid nuking the entire page.
+        end = min(len(text), m.end() + 1200)
+        return (text[:start] + "\n" + text[end:]).strip()
+
+    end = m_end.start()
+    return (text[:start] + "\n" + text[end:]).strip()
+
+
+FOREIGN_PREFIXES = (
+    "WO",
+    "WIPO",
+    "EP",
+    "EPO",
+    "PCT",
+    "KR",
+    "JP",
+    "CN",
+    "DE",
+    "FR",
+    "GB",
+    "UK",
+    "CA",
+    "TW",
+    "RU",
+    "BR",
+    "IN",
+    "AU",
+    "IT",
+    "ES",
+    "NL",
+    "SE",
+    "CH",
+)
+
+# Characters we consider “glue” between a prefix and the number
+_GLUE = r"[\s\(\)\[\]\{\}:;,\.\-–—/]*"
+
+# Matches e.g. "WO ", "WO-", "(WO)", "EP", "EP-" directly before the year
+FOREIGN_PREFIX_BEFORE_YEAR_PAT = re.compile(
+    rf"(?:^|[\s\(\[\{{])"
+    rf"({'|'.join(map(re.escape, FOREIGN_PREFIXES))})"
+    rf"{_GLUE}$",
+    re.IGNORECASE,
+)
+
+
+def is_foreign_publication_context(text: str, match_start: int) -> bool:
+    """
+    Returns True if the publication-like token at match_start appears to be preceded
+    by a foreign authority prefix (WO/EP/KR/JP/...).
+
+    We look at a short window immediately before the match and see if it ends with
+    a known foreign prefix plus glue punctuation.
+    """
+    # Look back far enough to include "(WO) " and similar
+    window_start = max(0, match_start - 20)
+    prefix_window = text[window_start:match_start].upper()
+
+    # Normalize whitespace for reliable matching
+    prefix_window = re.sub(r"\s+", " ", prefix_window)
+
+    return bool(FOREIGN_PREFIX_BEFORE_YEAR_PAT.search(prefix_window))
+
+
+def _page0_refs_start(p0: str) -> int | None:
+    """
+    Page-0 references can be interleaved into (54). Find the earliest usable anchor.
+    """
+    candidates = []
+    for pat in (
+        REFS_START_PAT,
+        REFS_WORDS_PAT,
+        US_PAT_DOCS_PAT,
+        FOREIGN_PAT_DOCS_PAT,
+        OTHER_PUBS_PAT,
+    ):
+        m = pat.search(p0)
+        if m:
+            candidates.append(m.start())
+    return min(candidates) if candidates else None
+
+
+def extract_references_region(pages_text: List[str], *, max_pages: int = 3) -> Dict[str, Any]:
     if not pages_text:
-        return {"raw": "", "pages_used": [], "used_fallback_full_text": False}
+        return {"raw": "", "pages_used": []}
 
     limit = min(len(pages_text), max_pages)
     pages_used: List[int] = []
-    parts: List[str] = []
+    chunks: List[str] = []
 
-    started = False
-    continued = False
+    # --- Page 0: strict slice ---
+    p0 = pages_text[0] or ""
+    start0 = _page0_refs_start(p0)
+    if start0 is None:
+        return {"raw": "", "pages_used": []}
 
-    for i in range(limit):
-        t = pages_text[i] or ""
-        part = _slice_refs_from_one_page(t)
+    end0 = len(p0)
+    m_abs = ABSTRACT_PAT.search(p0)
+    if m_abs and m_abs.start() > start0:
+        end0 = m_abs.start()
 
-        if part is not None:
-            parts.append(part)
-            pages_used.append(i)
-            started = True
-            # detect continuation signal in the page where refs start
-            if REFS_CONTINUED_PAT.search(t):
-                continued = True
+    chunks.append(p0[start0:end0].strip())
+    pages_used.append(0)
+
+    # --- Continuation pages: include if refs evidence, but strip Related App Data contamination ---
+    for i in range(1, limit):
+        pi = pages_text[i] or ""
+        if not pi.strip():
             continue
 
-        if started and continued:
-            # include whole page if it looks like the continuation of ref tables
-            if _page_contains_reference_table_like_content(t):
-                parts.append(t)
-                pages_used.append(i)
-            else:
-                # if we hit a page that doesn't look like refs, stop
-                break
+        pi2 = strip_related_application_data_block(pi)
 
-    raw = "\n\n".join([p for p in parts if p]).strip()
-    return {
-        "raw": raw,
-        "pages_used": pages_used,
-        "used_fallback_full_text": False,
-    }
+        has_heading = bool(REFS_EVIDENCE_PAT.search(pi2))
+        has_numbers = bool(US_GRANT_EVIDENCE_PAT.search(pi2) or US_PUB_EVIDENCE_PAT.search(pi2))
+
+        if has_heading or has_numbers:
+            chunks.append(pi2.strip())
+            pages_used.append(i)
+
+    return {"raw": "\n\n".join(chunks).strip(), "pages_used": pages_used}
 
 
 def extract_us_publications_from_refs(
     refs_text: str, *, exclude_canonicals: Optional[set] = None
 ) -> List[Dict[str, str]]:
-    seen = set()
-    out: List[Dict[str, str]] = []
     exclude_canonicals = exclude_canonicals or set()
+    out = []
+    seen = set()
 
     t = normalize_separators_for_refs(refs_text)
     t = normalize_kindcode_date_runins(t)
-    t = re.sub(r"Al", "A1", t)  # Common parse error
+    t = re.sub("Al", "A1", t)  # common OCR error
 
     for m in US_PUB_APP_PAT.finditer(t):
+        if is_foreign_publication_context(t, m.start()):
+            continue
         year = m.group(1)
         serial_raw = m.group(2)
         kind = (m.group(3) or "").upper()
@@ -920,13 +1251,22 @@ def extract_us_publications_from_refs(
         canon = normalize_us_pub_app(year, serial_raw)
         if not canon:
             continue
-        if canon in exclude_canonicals:
-            continue
-        if canon in seen:
+
+        if canon in exclude_canonicals or canon in seen:
             continue
         seen.add(canon)
 
-        out.append({"canonical": canon, "display": f"{year}/{canon[4:]}", "kind": kind})
+        out.append(
+            {
+                "canonical": canon,
+                "display": f"{year}/{canon[4:]}",
+                "kind": kind,
+                "source_match": m.group(0),  # REMOVE after debugging
+            }
+        )
+
+    out.sort(key=lambda x: int(x["canonical"]))
+
     return out
 
 
@@ -946,7 +1286,15 @@ def extract_cited_us_patents_from_refs(
         if digits in seen:
             continue
         seen.add(digits)
-        out.append({"digits": digits, "display": comma_format_us_patent(digits)})
+        out.append(
+            {
+                "digits": digits,
+                "display": comma_format_us_patent(digits),
+                "source_match": m.group(0),
+            }
+        )
+
+    out.sort(key=lambda x: int(x["digits"]))
     return out
 
 
@@ -1156,6 +1504,7 @@ def parse_front_matter(pages_text: List[str], *, max_pages: int = 3) -> Dict[str
 
     # Remove any prior no-cited warning computed from page0-only parsing
     warnings = [w for w in warnings if w != "no_cited_us_patents_found"]
+    warnings = [w for w in warnings if w != "no_cited_us_publications_found"]
 
     # Re-add warning only if (56) exists on page0 but still nothing extracted across pages
     if REFS_START_PAT.search(page0) and (len(cited_grants) == 0 and len(cited_pubs) == 0):
@@ -1219,7 +1568,7 @@ if __name__ == "__main__":
         sys.exit(1)
 
     pdf_path = sys.argv[1]
-    max_pages = 3
+    max_pages = 2
     if "--pages" in sys.argv:
         idx = sys.argv.index("--pages")
         if idx + 1 < len(sys.argv):
@@ -1249,4 +1598,5 @@ if __name__ == "__main__":
         "drawing sheets",
     )
     print("Cited US patents:", len(canon["cited_us_patents_digits"]))
+    print("Cited US publications:", len(canon["cited_us_publications"]))
     print("QA warnings:", parsed.get("qa", {}).get("warnings"))

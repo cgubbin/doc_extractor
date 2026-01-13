@@ -1,0 +1,48 @@
+{
+    "patent_number_normalized": "US10935501B2",
+    "title": "SUB-RESOLUTION DEFECT DETECTION",
+    "assignee": "Onto Innovation Inc., Wilmington, MA",
+    "inventors": [
+        "Nigel P. Smith, Beaverton, OR"
+    ],
+    "application_no": "16/197,737",
+    "filed_iso": "2018-11-21",
+    "grant_iso": "2021-03-02",
+    "reported_claim_count": 51,
+    "reported_drawing_sheet_count": 7,
+    "cited_us_patents_digits": [
+        "5864394",
+        "5875029",
+        "6081325",
+        "6295382",
+        "6747697",
+        "6928185",
+        "7230717",
+        "7433031",
+        "7440092",
+        "7463765",
+        "7532318",
+        "7684032",
+        "7864334",
+        "8000905",
+        "8275573",
+        "9013688",
+        "9235885"
+    ],
+    "cited_us_publications": [
+        "20050046865",
+        "20060067571",
+        "20070252986",
+        "20090037134",
+        "20090248340",
+        "20130271595",
+        "20160061745",
+        "20160163752",
+        "20160292840",
+        "20160373664",
+        "20170016715",
+        "20170082425",
+        "20170102339"
+    ],
+    "front_matter_pages_to_scan": 2
+}
