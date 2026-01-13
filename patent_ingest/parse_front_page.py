@@ -62,6 +62,46 @@ def strip_front_page_noise(text: str) -> str:
     return cleaned.strip()
 
 
+def _cut_at_heading(s: str, pat: re.Pattern) -> str:
+    if not s:
+        return s
+    m = pat.search(s)
+    return s[: m.start()].strip() if m else s.strip()
+
+
+def normalize_punctuation_spacing(s: str) -> str:
+    """
+    Fix common PDF-extraction spacing artifacts:
+      - "Oct . 20 , 2016" -> "Oct. 20, 2016"
+      - "Nigel P . Smith" -> "Nigel P. Smith"
+      - "Milipatis , CA" -> "Milipatis, CA"
+    Does NOT attempt spelling correction.
+    """
+    if not s:
+        return s
+    t = s
+
+    # Collapse whitespace
+    t = re.sub(r"\s+", " ", t).strip()
+
+    # Remove spaces before common punctuation
+    t = re.sub(r"\s+([,.;:)])", r"\1", t)
+
+    # Remove spaces after brackets
+    t = re.sub(r"([(])\s*", r"\1", t)
+
+    # Ensure a single space after punctuation when appropriate
+    # (Avoid touching decimals/abbreviations too aggressively.)
+    t = re.sub(r"([,;:])([^\s])", r"\1 \2", t)
+
+    # Fix spaced month abbreviations: "Oct .", "Sept ."
+    t = re.sub(
+        r"\b([A-Za-z]{3,4})\.\s*", lambda m: m.group(0), t
+    )  # no-op but keeps structure clear
+
+    return t
+
+
 # =============================================================================
 # pypdf integration helpers
 # =============================================================================
@@ -162,6 +202,10 @@ _MONTH_FIX = {
 }
 
 
+def remove_whitespace(s: str) -> str:
+    return re.sub(r"\s*", "", (s or ""))
+
+
 def parse_uspto_date_to_iso(raw: str) -> Optional[str]:
     """
     Accepts strings like "Dec. 8, 2009" or "December 8, 2009".
@@ -170,6 +214,7 @@ def parse_uspto_date_to_iso(raw: str) -> Optional[str]:
     if not raw:
         return None
     s = normalize_whitespace_basic(raw)
+    s = normalize_punctuation_spacing(s)
     for k, v in _MONTH_FIX.items():
         s = s.replace(k, v)
 
@@ -195,9 +240,11 @@ def normalize_patent_number_digits(s: str) -> Optional[str]:
     Extract digit-only patent number from strings like:
       "US 9,587,932 B2" -> "9587932"
     """
+    s = normalize_punctuation_spacing(s)
+
     if not s:
         return None
-    m = re.search(r"\b(\d{1,2}),(\d{3}),(\d{3})\b", s)
+    m = re.search(r"\b(\d{1,2}),\s*(\d{3}),\s*(\d{3})\b", s)
     if m:
         return f"{m.group(1)}{m.group(2)}{m.group(3)}"
     m = re.search(r"\b(\d{7,8})\b", s)
@@ -325,11 +372,23 @@ ASSIGNEE_STOP_PAT = re.compile(
     re.IGNORECASE,
 )
 
+ASSIGNEE_HEADING_STOP_PAT = re.compile(
+    r"\b("
+    r"FOREIGN\s+PATENT\s+DOCUMENTS|"
+    r"U\.S\.\s*PATENT\s+DOCUMENTS|"
+    r"OTHER\s+PUBLICATIONS|"
+    r"REFERENCES\s+CITED|"
+    r"ABSTRACT|"
+    r"Primary\s+Examiner|"
+    r"Assistant\s+Examiner"
+    r")\b",
+    re.IGNORECASE,
+)
+
+COUNTRY_TAG_PAT = re.compile(r"\(\s*[A-Z]{2}\s*\)\s*$")  # e.g., "(US)" at end
+
 
 def extract_assignee_clean(inid_blocks: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
-    """
-    Extract assignee from (73) or (71). Remove notice/boilerplate; do not store it.
-    """
     raw = None
     span = None
     if "73" in inid_blocks:
@@ -342,10 +401,26 @@ def extract_assignee_clean(inid_blocks: Dict[str, Dict[str, Any]]) -> Dict[str, 
         return {"raw": None, "value": None, "span": None}
 
     raw2 = strip_leading_label(raw, ["Assignee", "Assignees", "Assignee:"])
-    m = ASSIGNEE_STOP_PAT.search(raw2 or "")
-    assignee_only = raw2[: m.start()].strip() if m else (raw2 or "").strip()
+    raw2 = raw2.strip()
 
-    return {"raw": raw, "value": assignee_only or None, "span": span}
+    # 1) Stop at front-matter headings
+    m_h = ASSIGNEE_HEADING_STOP_PAT.search(raw2)
+    if m_h:
+        raw2 = raw2[: m_h.start()].strip()
+
+    # 2) Stop at PTA / notice boilerplate
+    m_b = ASSIGNEE_STOP_PAT.search(raw2)
+    if m_b:
+        raw2 = raw2[: m_b.start()].strip()
+
+    # 3) Finally strip a dangling country tag like "(US)"
+    raw2 = normalize_punctuation_spacing(COUNTRY_TAG_PAT.sub("", raw2).strip())
+
+    return {
+        "raw": raw,
+        "value": raw2 or None,
+        "span": span,
+    }
 
 
 # =============================================================================
@@ -357,7 +432,7 @@ LOCATION_IN_PARENS_PAT = re.compile(r"\(([^)]+)\)\s*$")
 
 
 def normalize_entity_name(name: str) -> str:
-    n = normalize_whitespace_basic(name)
+    n = normalize_punctuation_spacing(normalize_whitespace_basic(name))
     n = n.replace("’", "'").replace("–", "-").replace("—", "-")
     n = re.sub(r"[,\.;:\s]+$", "", n)
     return n
@@ -367,11 +442,11 @@ def split_name_and_location(raw: str) -> Dict[str, Optional[str]]:
     raw_clean = normalize_whitespace_basic(raw)
     m = LOCATION_IN_PARENS_PAT.search(raw_clean)
     if m:
-        loc = normalize_whitespace_basic(m.group(1))
-        nm = raw_clean[: m.start()].strip()
+        loc = normalize_punctuation_spacing(normalize_whitespace_basic(m.group(1)))
+        nm = normalize_punctuation_spacing(raw_clean[: m.start()].strip())
     else:
         loc = None
-        nm = raw_clean
+        nm = normalize_punctuation_spacing(raw_clean)
     return {"name": nm or None, "location": loc}
 
 
@@ -418,15 +493,12 @@ def extract_inventors(front_text: str, inid_blocks: Dict[str, Dict[str, Any]]) -
     - or as label-based substring depending on extraction order.
     """
     if "72" in inid_blocks:
-        print("inid 72 found")
         raw = inid_blocks["72"]["text"].strip()
         span = inid_blocks["72"]["span"]
     elif "75" in inid_blocks:
-        print("inid 75 found")
         raw = inid_blocks["75"]["text"].strip()
         span = inid_blocks["75"]["span"]
     else:
-        print("re search")
         m = re.search(r"\bInventors?\s*[:\-]\s*(.+)", front_text or "", flags=re.IGNORECASE)
         if not m:
             return {"raw": None, "value": None, "span": None, "parsed": []}
@@ -447,11 +519,57 @@ def extract_inventors(front_text: str, inid_blocks: Dict[str, Dict[str, Any]]) -
 # =============================================================================
 
 # Fallback patterns (robust when INID blocks are disrupted)
-APPL_NO_FALLBACK_PAT = re.compile(r"\bAppl\.\s*No\.\s*:\s*([0-9]{2}/[0-9,]{3,7})\b", re.IGNORECASE)
-FILED_FALLBACK_PAT = re.compile(r"\bFiled\s*:\s*([A-Za-z\.]+\s+\d{1,2},\s+\d{4})\b", re.IGNORECASE)
-DATE_OF_PATENT_FALLBACK_PAT = re.compile(
-    r"\bDate\s+of\s+Patent\s*:\s*([A-Za-z\.]+\s+\d{1,2},\s+\d{4})\b", re.IGNORECASE
+APPL_NO_FALLBACK_PAT = re.compile(
+    r"\bAppl\s*\.\s*No\s*\.\s*:\s*([0-9]{2}\s*/\s*[0-9\s*,\s*]{3,7}[0-9]{3})\b", re.IGNORECASE
 )
+FILED_FALLBACK_PAT = re.compile(
+    r"\bFiled\s*:\s*([A-Za-z\s*\.]+\s*+\d{1,2}\s*,\s*+\d{4})\b", re.IGNORECASE
+)
+DATE_OF_PATENT_FALLBACK_PAT = re.compile(
+    r"\bDate\s+of\s+Patent\s*:\s*([A-Za-z\s*\.]+\s*+\d{1,2}\s*,\s*+\d{4})\b", re.IGNORECASE
+)
+# Headings that frequently follow (21) and can contaminate the INID slice
+APPL_STOP_PAT = re.compile(
+    r"\b(OTHER\s+PUBLICATIONS|U\.S\.\s*PATENT\s*DOCUMENTS|FOREIGN\s+PATENT\s*DOCUMENTS|"
+    r"REFERENCES\s+CITED|ABSTRACT|Primary\s+Examiner|Assistant\s+Examiner)\b",
+    re.IGNORECASE,
+)
+
+
+def normalize_us_application_no(raw: str) -> Optional[str]:
+    """
+    Normalize variants like '13 / 766 , 598' -> '13/766,598'
+    """
+    if not raw:
+        return None
+
+    s = raw.upper()
+    s = s.replace("O", "0")  # defensive; sometimes O->0 issues happen
+    s = re.sub(r"\s+", "", s)
+
+    # Keep only digits, slash, comma
+    s = re.sub(r"[^0-9/,]", "", s)
+
+    # Must contain exactly one slash with digits on both sides
+    if s.count("/") != 1:
+        return None
+    left, right = s.split("/", 1)
+    if not left.isdigit():
+        return None
+
+    # Remove commas from right side then reinsert properly if long enough
+    right_digits = re.sub(r"[^0-9]", "", right)
+    if not right_digits.isdigit():
+        return None
+
+    # Typical: 6 digits -> XXX,XXX ; sometimes 7+ exist; keep last 6 grouped
+    if len(right_digits) >= 6:
+        main = right_digits[:-3]
+        tail = right_digits[-3:]
+        return f"{left}/{main},{tail}"
+    else:
+        # Keep as-is (rare)
+        return f"{left}/{right_digits}"
 
 
 def extract_application_number(
@@ -459,19 +577,29 @@ def extract_application_number(
 ) -> Dict[str, Any]:
     raw = inid_blocks.get("21", {}).get("text")
     span = inid_blocks.get("21", {}).get("span")
-    clean = strip_leading_label(
-        raw or "", ["Appl. No.", "Appl No.", "Application No.", "Application No"]
-    )
-    clean = clean or None
 
-    # fallback
+    clean = strip_leading_label(
+        normalize_punctuation_spacing(raw) or "",
+        ["Appl. No.", "Appl No.", "Application No.", "Application No"],
+    )
+    clean = _cut_at_heading(clean, APPL_STOP_PAT) if clean else None
+
+    # fallback if INID slice is broken
     if not clean:
         m = APPL_NO_FALLBACK_PAT.search(front_text or "")
         if m:
             clean = m.group(1).strip()
+            clean = _cut_at_heading(clean, APPL_STOP_PAT)
             span = {"start": m.start(1), "end": m.end(1)}
 
-    return {"raw": raw, "value": clean, "span": span}
+    normalized = normalize_us_application_no(clean) if clean else None
+
+    return {
+        "raw": raw,
+        "value": normalized or clean,
+        "normalized": normalized,
+        "span": span,
+    }
 
 
 def extract_filed_date(front_text: str, inid_blocks: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
@@ -508,7 +636,8 @@ def extract_grant_date(front_text: str, inid_blocks: Dict[str, Dict[str, Any]]) 
     m = DATE_OF_PATENT_FALLBACK_PAT.search(front_text or "")
     if m:
         clean = m.group(1).strip()
-        iso = parse_uspto_date_to_iso(clean) if clean else None
+        normalized = "".join(clean.split())
+        iso = parse_uspto_date_to_iso(normalized) if normalized else None
         return {"raw": raw, "value": clean, "iso": iso, "span": span}
 
     # fallback to first date in the front text
@@ -530,6 +659,56 @@ def extract_grant_date(front_text: str, inid_blocks: Dict[str, Dict[str, Any]]) 
 
 
 # =============================================================================
+# Get the prior publication number
+# =============================================================================
+
+
+PRIOR_PUB_HEAD_PAT = re.compile(r"\bPrior\s+Publication\s+Data\b", re.IGNORECASE)
+
+# Matches: "US 2016/0238378 A1" and variants with weird slashes
+US_PRIOR_PUB_PAT = re.compile(
+    r"\bUS\s+((?:19|20)\d{2})\s*[/\.\u2044\u2215\uFF0F]\s*([0-9O][0-9O,\s\.]{5,12})\s*(A\d|A9|B\d)\b",
+    re.IGNORECASE,
+)
+
+
+def extract_prior_publications(page0_text: str) -> List[Dict[str, str]]:
+    """
+    Extract the patent's own prior publication numbers from the 'Prior Publication Data' region.
+    Returns a list of dicts: {canonical, display, kind}.
+    """
+    t = normalize_separators_for_refs(page0_text or "")
+
+    # Try to restrict to the region after the heading if it exists
+    mh = PRIOR_PUB_HEAD_PAT.search(t)
+    region = t[mh.start() :] if mh else t
+
+    out: List[Dict[str, str]] = []
+    seen = set()
+
+    for m in US_PRIOR_PUB_PAT.finditer(region):
+        year = m.group(1)
+        serial_raw = m.group(2)
+        kind = (m.group(3) or "").upper()
+
+        canon = normalize_us_pub_app(year, serial_raw)
+        if not canon:
+            continue
+        if canon in seen:
+            continue
+        seen.add(canon)
+
+        out.append(
+            {
+                "canonical": canon,  # e.g. 20160238378
+                "display": f"{year}/{canon[4:]}",  # e.g. 2016/0238378
+                "kind": kind,  # e.g. A1
+            }
+        )
+    return out
+
+
+# =============================================================================
 # References cited extraction (region-based; supports continuation to page 2+)
 # =============================================================================
 
@@ -544,14 +723,30 @@ US_PATENT_GROUPED_PAT = re.compile(r"\b(\d{1,2})\s*[,\.]\s*(\d{3})\s*[,\.]\s*(\d
 #   2003. O165178 A1
 #   2004/O112863 A1
 #   2007/0293,052 A1
+# US_PUB_APP_PAT = re.compile(
+#     r"""
+#     \b((?:19|20)\d{2})              # year
+#     \s*[/\.]\s*                     # separator: / or .  (after normalization)
+#     ([0-9O][0-9O,\s\.]{5,12})       # serial-ish (may contain commas/spaces/dots; may have O)
+#     \s*
+#     (A\d|A9|B\d)                    # kind code REQUIRED
+#     \s*[*†]?\b                      # optional star/dagger
+#     """,
+#     re.IGNORECASE | re.VERBOSE,
+# )
+#
 US_PUB_APP_PAT = re.compile(
     r"""
-    \b((?:19|20)\d{2})              # year
-    \s*[/\.]\s*                     # separator: / or .  (after normalization)
-    ([0-9O][0-9O,\s\.]{5,12})       # serial-ish (may contain commas/spaces/dots; may have O)
+    \b((?:19|20)\d{2})                         # year
+    \s*[/\.\u2044\u2215\uFF0F]\s*              # separator: / or . or unicode slashes
+    ([0-9O][0-9O,\s\.]{5,12})                  # serial-ish (may contain commas/spaces/dots; may have O)
     \s*
-    (A\d|A9|B\d)                    # kind code REQUIRED
-    \s*[*†]?\b                      # optional star/dagger
+    (A\d|A9|B\d)                               # kind code REQUIRED
+    \s*[*†]?                                   # optional star/dagger
+    (?=                                       # IMPORTANT: allow immediate date run-in or whitespace/end
+        \s|$|[^\w]|
+        \d{1,2}\s*[/\.\u2044\u2215\uFF0F]\s*(?:19|20)\d{2}   # e.g., 4/2009
+    )
     """,
     re.IGNORECASE | re.VERBOSE,
 )
@@ -638,6 +833,24 @@ def _page_contains_reference_table_like_content(t: str) -> bool:
     return False
 
 
+def normalize_kindcode_date_runins(text: str) -> str:
+    """
+    Fix common run-in where kind code touches the following date:
+      'A14/2009'  -> 'A1 4/2009'
+      'A112/2010' -> 'A1 12/2010'
+      'B21/2008'  -> 'B2 1/2008'
+    """
+    if not text:
+        return ""
+    # Kind code (A1/A9/B1/B2 etc.) immediately followed by day/month number then '/' or '.'
+    return re.sub(
+        r"\b((?:A\d|A9|B\d))(\d{1,2})\s*([/\.\u2044\u2215\uFF0F])\s*((?:19|20)\d{2})\b",
+        r"\1 \2/\4",
+        text,
+        flags=re.IGNORECASE,
+    )
+
+
 def extract_references_region(pages_text: List[str], *, max_pages: int = 3) -> Dict[str, Any]:
     """
     Extract references text by region:
@@ -688,11 +901,16 @@ def extract_references_region(pages_text: List[str], *, max_pages: int = 3) -> D
     }
 
 
-def extract_us_publications_from_refs(refs_text: str) -> List[Dict[str, str]]:
+def extract_us_publications_from_refs(
+    refs_text: str, *, exclude_canonicals: Optional[set] = None
+) -> List[Dict[str, str]]:
     seen = set()
     out: List[Dict[str, str]] = []
+    exclude_canonicals = exclude_canonicals or set()
 
     t = normalize_separators_for_refs(refs_text)
+    t = normalize_kindcode_date_runins(t)
+    t = re.sub(r"Al", "A1", t)  # Common parse error
 
     for m in US_PUB_APP_PAT.finditer(t):
         year = m.group(1)
@@ -700,18 +918,15 @@ def extract_us_publications_from_refs(refs_text: str) -> List[Dict[str, str]]:
         kind = (m.group(3) or "").upper()
 
         canon = normalize_us_pub_app(year, serial_raw)
-        if not canon or canon in seen:
+        if not canon:
+            continue
+        if canon in exclude_canonicals:
+            continue
+        if canon in seen:
             continue
         seen.add(canon)
 
-        out.append(
-            {
-                "canonical": canon,
-                "display": f"{year}/{canon[4:]}",
-                "kind": kind,
-            }
-        )
-
+        out.append({"canonical": canon, "display": f"{year}/{canon[4:]}", "kind": kind})
     return out
 
 
@@ -790,6 +1005,8 @@ def parse_front_page(front_text: str) -> Dict[str, Any]:
     appl_obj = extract_application_number(front_text, inid)
     if not appl_obj.get("value"):
         qa_warnings.append("missing_or_empty_application_number")
+    if appl_obj.get("value") and APPL_STOP_PAT.search(appl_obj.get("raw") or ""):
+        qa_info["application_no_was_trimmed_at_heading"] = True
 
     filed_obj = extract_filed_date(front_text, inid)
     if filed_obj.get("value") and not filed_obj.get("iso"):
@@ -821,11 +1038,15 @@ def parse_front_page(front_text: str) -> Dict[str, Any]:
         fm_span = {"start": 0, "end": len(front_text)}
         front_matter = front_text.strip()
 
+    prior_pubs = extract_prior_publications(front_text)
+
     # References region only from page 0 (best effort)
     refs_region = extract_references_region([front_text], max_pages=1)
     refs_text = refs_region["raw"]
     cited_grants = extract_cited_us_patents_from_refs(refs_text, patent_digits)  # your existing one
-    cited_pubs = extract_us_publications_from_refs(refs_text)
+    cited_pubs = extract_us_publications_from_refs(
+        refs_text, exclude_canonicals={p["canonical"] for p in prior_pubs}
+    )
 
     if REFS_START_PAT.search(front_text) and not cited_grants:
         qa_warnings.append("no_cited_us_patents_found")
@@ -864,6 +1085,7 @@ def parse_front_page(front_text: str) -> Dict[str, Any]:
         "grant_date": grant_obj,
         "reported_counts": counts_obj,
         "abstract": abstract_obj,
+        "prior_publication_data": {"us_publications": prior_pubs},
         "references_cited": {
             "raw": refs_region["raw"],
             "pages_used": refs_region.get("pages_used", []),
@@ -910,7 +1132,9 @@ def parse_front_matter(pages_text: List[str], *, max_pages: int = 3) -> Dict[str
     # Published applications (A1/A9/etc.) with OCR artifacts (O->0, dot vs slash, commas/spaces)
     # NOTE: This function must exist in your module; if you haven't added it yet,
     # add the implementation we discussed (US_PUB_APP_PAT + normalize_us_pub_app).
-    cited_pubs = extract_us_publications_from_refs(refs_text)
+    prior = (base.get("prior_publication_data") or {}).get("us_publications") or []
+    exclude = {p["canonical"] for p in prior if p.get("canonical")}
+    cited_pubs = extract_us_publications_from_refs(refs_text, exclude_canonicals=exclude)
 
     # 4) Replace references section in base output
     base["references_cited"] = {
