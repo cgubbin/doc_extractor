@@ -1172,9 +1172,7 @@ def extract_us_publications_from_refs(
     t = normalize_kindcode_date_runins(t)
     t = re.sub("Al", "A1", t)  # common OCR error
 
-    print(t)
     for m in US_PUB_APP_PAT.finditer(t):
-        print(m.group(0))
         if is_foreign_publication_context(t, m.start()):
             continue
         year = m.group(1)

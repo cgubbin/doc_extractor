@@ -1,30 +1,22 @@
+[project]
+name = "patent_ingest"
+version = "0.1.0"
+description = "Patent PDF parsing (front matter, drawings, body)"
+requires-python = ">=3.10"
+dependencies = ["pypdf"]
+
 [build-system]
 requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
-[project]
-name = "patent-ingest"
-version = "0.1.0"
-description = "Poppler-based ingestion of Google Patents PDFs: text, figures, claims diff, excerpts."
-readme = "README.md"
-requires-python = ">=3.10"
-dependencies = [
-    "fitz>=0.0.1.dev2",
-    "pillow>=12.1.0",
-    "pymupdf>=1.26.7",
-    "pypdf[full]>=6.6.0",
-    "pytesseract>=0.3.13",
-    "scikit-learn>=1.3",
-]
+[tool.setuptools.packages.find]
+where = ["src"]
 
-[project.optional-dependencies]
-dev = ["pytest>=7.4", "ruff>=0.5", "pillow>=10.0", "numpy>=1.24"]
+[tool.setuptools]
+include-package-data = true
 
 [project.scripts]
 patent-ingest = "patent_ingest.__main__:main"
 
-[tool.setuptools]
-packages = ["patent_ingest"]
-
-[tool.ruff]
-line-length = 100
+[tool.setuptools.package-data]
+"patent_ingest" = ["schemas/*.json"]

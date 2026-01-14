@@ -4,6 +4,7 @@ patent_ingest/__init__.py
 patent_ingest/__main__.py
 patent_ingest/drawing_sheets.py
 patent_ingest/ingest.py
+patent_ingest/parse_body.py
 patent_ingest/parse_front_page.py
 patent_ingest/pipeline.py
 patent_ingest/two_column.py
