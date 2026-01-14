@@ -2,15 +2,15 @@ README.md
 pyproject.toml
 patent_ingest/__init__.py
 patent_ingest/__main__.py
+patent_ingest/drawing_sheets.py
 patent_ingest/ingest.py
 patent_ingest/parse_front_page.py
 patent_ingest/pipeline.py
 patent_ingest/two_column.py
+patent_ingest/utils.py
 patent_ingest.egg-info/PKG-INFO
 patent_ingest.egg-info/SOURCES.txt
 patent_ingest.egg-info/dependency_links.txt
 patent_ingest.egg-info/entry_points.txt
 patent_ingest.egg-info/requires.txt
 patent_ingest.egg-info/top_level.txt
-tests/test_front_page_single.py
-tests/test_golden_front_pages.py

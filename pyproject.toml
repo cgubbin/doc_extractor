@@ -9,9 +9,11 @@ description = "Poppler-based ingestion of Google Patents PDFs: text, figures, cl
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
+    "fitz>=0.0.1.dev2",
     "pillow>=12.1.0",
     "pymupdf>=1.26.7",
     "pypdf[full]>=6.6.0",
+    "pytesseract>=0.3.13",
     "scikit-learn>=1.3",
 ]
 

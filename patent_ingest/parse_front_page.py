@@ -985,75 +985,6 @@ RELATED_APP_HEAD_PAT = re.compile(r"\bRelated\s+U\.S\.\s+Application\s+Data\b", 
 PRIMARY_EXAMINER_PAT = re.compile(r"\bPrimary\s+Examiner\b", re.IGNORECASE)
 
 
-# def strip_related_application_data_block(text: str) -> str:
-#     """
-#     Remove the 'Related U.S. Application Data' section, which can include 'now Pat. No. ...'
-#     and must not contaminate (56) citations.
-#     """
-#     if not text:
-#         return ""
-#     m = RELATED_APP_HEAD_PAT.search(text)
-#     if not m:
-#         return text
-#
-#     start = m.start()
-#     # Typically ends before 'Primary Examiner' on the front matter page.
-#     m_end = PRIMARY_EXAMINER_PAT.search(text, m.end())
-#     if m_end:
-#         end = m_end.start()
-#         return (text[:start] + "\n" + text[end:]).strip()
-#
-#     # Fallback: if there is a (56) later, remove up to that first (56)
-#     m56 = REFS_START_PAT.search(text, m.end())
-#     if m56:
-#         end = m56.start()
-#         return (text[:start] + "\n" + text[end:]).strip()
-#
-#     # If we can't find a safe end marker, leave text unchanged (better to keep refs than over-delete)
-#     return text
-#
-#
-# def extract_references_region(pages_text: List[str], *, max_pages: int = 3) -> Dict[str, Any]:
-#     if not pages_text:
-#         return {"raw": "", "pages_used": []}
-#
-#     limit = min(len(pages_text), max_pages)
-#     pages_used: List[int] = []
-#     chunks: List[str] = []
-#
-#     # --- Page 0: strict slice from (56) to (57) ABSTRACT ---
-#     p0 = pages_text[0] or ""
-#     m0 = REFS_START_PAT.search(p0)
-#     if not m0:
-#         return {"raw": "", "pages_used": []}
-#
-#     start0 = m0.start()
-#     end0 = len(p0)
-#     m_abs = ABSTRACT_PAT.search(p0)
-#     if m_abs and m_abs.start() > start0:
-#         end0 = m_abs.start()
-#     chunks.append(p0[start0:end0].strip())
-#     pages_used.append(0)
-#
-#     # --- Continuation pages: include whole page if it has refs evidence, but strip Related App Data ---
-# for i in range(1, limit):
-#     pi = pages_text[i] or ""
-#     if not pi.strip():
-#         continue
-#
-#     # Strip related-app section to prevent "now Pat. No." contamination (US9587932B2 case)
-#     pi2 = strip_related_application_data_block(pi)
-#
-#     has_heading = bool(REFS_EVIDENCE_PAT.search(pi2))
-#     has_numbers = bool(US_GRANT_EVIDENCE_PAT.search(pi2) or US_PUB_EVIDENCE_PAT.search(pi2))
-#
-#     if has_heading or has_numbers:
-#         chunks.append(pi2.strip())
-#         pages_used.append(i)
-#
-# return {"raw": "\n\n".join(chunks).strip(), "pages_used": pages_used}
-
-
 # More tolerant: allow newlines and weird spacing between tokens
 REFS_START_PAT = re.compile(r"\(\s*56\s*\)\s*References\s*Cited", re.IGNORECASE)
 REFS_WORDS_PAT = re.compile(r"\bReferences\s*Cited\b", re.IGNORECASE)
@@ -1241,7 +1172,9 @@ def extract_us_publications_from_refs(
     t = normalize_kindcode_date_runins(t)
     t = re.sub("Al", "A1", t)  # common OCR error
 
+    print(t)
     for m in US_PUB_APP_PAT.finditer(t):
+        print(m.group(0))
         if is_foreign_publication_context(t, m.start()):
             continue
         year = m.group(1)

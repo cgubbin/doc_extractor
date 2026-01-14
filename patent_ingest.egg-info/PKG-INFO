@@ -4,9 +4,11 @@ Version: 0.1.0
 Summary: Poppler-based ingestion of Google Patents PDFs: text, figures, claims diff, excerpts.
 Requires-Python: >=3.10
 Description-Content-Type: text/markdown
+Requires-Dist: fitz>=0.0.1.dev2
 Requires-Dist: pillow>=12.1.0
 Requires-Dist: pymupdf>=1.26.7
 Requires-Dist: pypdf[full]>=6.6.0
+Requires-Dist: pytesseract>=0.3.13
 Requires-Dist: scikit-learn>=1.3
 Provides-Extra: dev
 Requires-Dist: pytest>=7.4; extra == "dev"

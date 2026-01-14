@@ -1,0 +1,521 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+import re
+
+from pypdf import PdfReader, PdfWriter
+
+
+# ----------------------------
+# Regex patterns
+# ----------------------------
+
+_SHEET_OF_RE = re.compile(r"\bSheet\s+([0-9A-Za-z]+)\s+of\s+([0-9]+)\b", re.IGNORECASE)
+
+_FIG_TOKEN_RE = re.compile(r"^(?:Fig\.?|FIG\.?)$", re.IGNORECASE)
+_FIG_COMBINED_RE = re.compile(r"^(?:Fig\.?|FIG\.?)([0-9]+[A-Za-z]?)$", re.IGNORECASE)
+_FIG_NUM_RE = re.compile(r"^([0-9]+[A-Za-z]?)$")
+
+
+# ----------------------------
+# QA warning keys
+# ----------------------------
+
+W_EXPECTED_MISSING = "drawing_sheets_expected_missing"
+W_SEGMENTATION_NO_RENDERER = "no renderer detected for segmentation"
+W_PAGE_RANGE_OOB = "drawing_sheets_page_range_out_of_bounds"
+W_COUNT_MISMATCH = "drawing_sheets_count_mismatch"
+W_EXPORT_FAILED = "drawing_sheet_export_failed"
+
+W_HEURISTIC_USED = "drawing_sheets_heuristic_used"
+W_HEURISTIC_FOUND_NONE = "drawing_sheets_heuristic_found_none"
+
+W_FIGURES_NO_OCR = "drawing_figures_enabled_but_no_ocr"
+W_FIGURES_OCR_FAILED = "drawing_figures_ocr_failed"
+W_FIGURES_NONE_ON_SHEET_PREFIX = "drawing_figures_none_on_sheet_"
+
+
+# ----------------------------
+# Helpers
+# ----------------------------
+
+
+def _get_front_matter_value(front_matter: dict, *keys, default=None):
+    for k in keys:
+        if k in front_matter:
+            return front_matter.get(k)
+    nested = front_matter.get("front_matter")
+    if isinstance(nested, dict):
+        for k in keys:
+            if k in nested:
+                return nested.get(k)
+    return default
+
+
+def _normalize_sheet_index_token(token: str) -> Optional[int]:
+    t = token.strip()
+    if t.isdigit():
+        return int(t)
+
+    if len(t) == 1:
+        return {
+            "S": 5,
+            "s": 5,
+            "I": 1,
+            "i": 1,
+            "O": 0,
+            "o": 0,
+            "Z": 2,
+            "z": 2,
+        }.get(t)
+
+    t2 = re.sub(r"[^0-9A-Za-z]", "", t)
+    if t2.isdigit():
+        return int(t2)
+    if len(t2) == 1:
+        return _normalize_sheet_index_token(t2)
+    return None
+
+
+def _extract_sheet_of_from_text(text: str) -> Optional[Tuple[Optional[int], Optional[int]]]:
+    m = _SHEET_OF_RE.search(text or "")
+    if not m:
+        return None
+    return (
+        _normalize_sheet_index_token(m.group(1)),
+        int(m.group(2)),
+    )
+
+
+def _ensure_dir(p: Path) -> None:
+    p.mkdir(parents=True, exist_ok=True)
+
+
+@dataclass
+class _FigureItem:
+    label: str
+    bbox_norm: List[float]
+    confidence: Optional[float]
+
+
+def _try_import_ocr_stack():
+    """
+    Optional OCR stack.
+    Uses pymupdf (not deprecated fitz), pytesseract, PIL.
+    """
+    try:
+        import pymupdf
+        import pytesseract
+        from PIL import Image
+        import io
+
+        return pymupdf, pytesseract, Image, io
+    except Exception:
+        return None
+
+
+def _ocr_detect_figures_on_page(
+    *,
+    pdf_path: str,
+    pdf_page_index: int,
+    dpi: int,
+) -> Tuple[List[_FigureItem], Optional[str]]:
+    stack = _try_import_ocr_stack()
+    if stack is None:
+        return [], "ocr_stack_unavailable"
+
+    pymupdf, pytesseract, Image, io = stack
+
+    try:
+        doc = pymupdf.open(pdf_path)
+        page = doc.load_page(pdf_page_index)
+        pix = page.get_pixmap(dpi=dpi)
+        img = Image.open(io.BytesIO(pix.tobytes("png")))
+        W, H = img.size
+
+        data = pytesseract.image_to_data(
+            img,
+            output_type=pytesseract.Output.DICT,
+            config="--oem 3 --psm 6",
+        )
+
+        toks = []
+        for i, t in enumerate(data.get("text", [])):
+            t = (t or "").strip()
+            if not t:
+                continue
+            conf = float(data["conf"][i]) if data["conf"][i] != "-1" else -1.0
+            toks.append(
+                {
+                    "t": t,
+                    "conf": conf,
+                    "x": int(data["left"][i]),
+                    "y": int(data["top"][i]),
+                    "w": int(data["width"][i]),
+                    "h": int(data["height"][i]),
+                }
+            )
+
+        labels = []
+
+        # Combined tokens: Fig.3A
+        for tok in toks:
+            m = _FIG_COMBINED_RE.fullmatch(tok["t"])
+            if m:
+                lab = m.group(1).upper()
+                labels.append((lab, tok))
+
+        # Split tokens: Fig. + 3A
+        fig_tokens = [t for t in toks if _FIG_TOKEN_RE.fullmatch(t["t"])]
+        num_tokens = [t for t in toks if _FIG_NUM_RE.fullmatch(t["t"])]
+
+        for f in fig_tokens:
+            f_cy = f["y"] + f["h"] / 2
+            for n in num_tokens:
+                if abs((n["y"] + n["h"] / 2) - f_cy) <= max(12, f["h"]):
+                    if 0 <= n["x"] - (f["x"] + f["w"]) <= 220:
+                        labels.append(
+                            (
+                                n["t"].upper(),
+                                {
+                                    "conf": min(f["conf"], n["conf"]),
+                                    "x0": min(f["x"], n["x"]),
+                                    "y0": min(f["y"], n["y"]),
+                                    "x1": max(f["x"] + f["w"], n["x"] + n["w"]),
+                                    "y1": max(f["y"] + f["h"], n["y"] + n["h"]),
+                                },
+                            )
+                        )
+
+        best = {}
+        for lab, tok in labels:
+            conf = tok["conf"]
+            if lab not in best or conf > best[lab]["conf"]:
+                best[lab] = tok
+
+        items = []
+        for lab, t in best.items():
+            bbox_norm = [
+                t["x0"] / W,
+                t["y0"] / H,
+                t["x1"] / W,
+                t["y1"] / H,
+            ]
+            items.append(
+                _FigureItem(
+                    label=lab,
+                    bbox_norm=bbox_norm,
+                    confidence=None if t["conf"] < 0 else min(1.0, t["conf"] / 100.0),
+                )
+            )
+
+        return items, None
+
+    except Exception as e:
+        return [], f"ocr_exception:{type(e).__name__}"
+
+
+def _heuristic_find_drawing_sheet_indices(
+    reader: PdfReader,
+    *,
+    start_index: int,
+    max_pages_scan: int,
+    qa_warnings: List[str],
+    qa_info: Dict[str, Any],
+) -> Tuple[List[int], Optional[int]]:
+    """
+    Heuristic Phase 1 detection when expected sheet count is missing.
+
+    Strategy:
+      - Scan forward from start_index up to max_pages_scan pages.
+      - Identify "Sheet X of Y" using text extraction.
+      - Collect consecutive pages that look like drawing sheets.
+      - Infer expected total from the max/most-recent "of Y" observed.
+
+    Returns (sheet_page_indices, inferred_expected_total).
+    """
+    qa_warnings.append(W_HEURISTIC_USED)
+
+    num_pages = len(reader.pages)
+    stop_at = min(num_pages, start_index + max_pages_scan)
+
+    indices: List[int] = []
+    inferred_total: Optional[int] = None
+
+    for i in range(start_index, stop_at):
+        text = reader.pages[i].extract_text() or ""
+        sheet_of = _extract_sheet_of_from_text(text)
+
+        if sheet_of is None:
+            # If we already started collecting sheets, break on first non-match.
+            if indices:
+                break
+            continue
+
+        sheet_i, total_i = sheet_of
+        indices.append(i)
+        if total_i is not None:
+            inferred_total = total_i
+
+    if not indices:
+        qa_warnings.append(W_HEURISTIC_FOUND_NONE)
+
+    qa_info["heuristic_scan_start_index"] = start_index
+    qa_info["heuristic_scan_max_pages"] = max_pages_scan
+    qa_info["heuristic_inferred_total"] = inferred_total
+    qa_info["heuristic_sheet_page_indices"] = indices
+
+    return indices, inferred_total
+
+
+# ----------------------------
+# Public API
+# ----------------------------
+
+
+def process_drawing_sheets(
+    pdf_path: str,
+    *,
+    front_matter: dict,
+    drawings_start_index: int,
+    output_dir: Optional[str] = None,
+    export_pdf: bool = True,
+    export_png: bool = False,
+    segment_drawings: bool = False,
+    max_pages_scan: int = 10,
+    detect_figures: bool = False,
+    figure_ocr_dpi: int = 200,
+) -> Dict[str, Any]:
+    """
+    Extract and (optionally) segment drawing sheets.
+
+    Phase 1:
+      * Select drawing sheet page range using front-matter expected count, when present.
+      * If expected count missing, use heuristic detection of consecutive "Sheet X of Y" pages.
+      * Export one-PDF-per-sheet if requested.
+      * Return stable metadata + QA diagnostics.
+
+    Figure detection:
+      * Optional OCR-based detection of "Fig. N" labels and their locations.
+      * Stores normalized bounding boxes (top-left origin).
+
+    Segmentation:
+      * Still stubbed (renderer-agnostic). Prefer using figure detection for counts/locations.
+    """
+
+    qa_warnings: List[str] = []
+    qa_info: Dict[str, Any] = {}
+
+    reader = PdfReader(pdf_path)
+    pdf_num_pages = len(reader.pages)
+
+    expected_sheet_count = front_matter["reported_counts"]["reported_drawing_sheet_count"]
+    front_page_index = 0
+    front_matter_pages_scanned = drawings_start_index
+
+    # Drawing sheets assumed to start immediately after front matter
+    start_index = (
+        drawings_start_index
+        if drawings_start_index
+        else front_page_index + front_matter_pages_scanned
+    )
+
+    sheet_page_indices: List[int] = []
+    expected_source = "front_matter" if expected_sheet_count is not None else None
+
+    if expected_sheet_count is None:
+        qa_warnings.append(W_EXPECTED_MISSING)
+        sheet_page_indices, inferred_total = _heuristic_find_drawing_sheet_indices(
+            reader,
+            start_index=start_index,
+            max_pages_scan=max_pages_scan,
+            qa_warnings=qa_warnings,
+            qa_info=qa_info,
+        )
+        if inferred_total is not None:
+            expected_sheet_count = inferred_total
+            expected_source = "heuristic"
+    else:
+        # Deterministic range selection based on expected count
+        end_index_exclusive = start_index + expected_sheet_count
+        if end_index_exclusive > pdf_num_pages:
+            qa_warnings.append(W_PAGE_RANGE_OOB)
+            end_index_exclusive = pdf_num_pages
+        sheet_page_indices = list(range(start_index, end_index_exclusive))
+
+    sheet_count = len(sheet_page_indices)
+
+    if expected_sheet_count is not None and sheet_count != expected_sheet_count:
+        qa_warnings.append(W_COUNT_MISMATCH)
+        qa_info["expected_sheet_count"] = expected_sheet_count
+        qa_info["actual_sheet_count"] = sheet_count
+
+    # Export directory structure
+    export_base: Optional[Path] = None
+    if output_dir:
+        export_base = Path(output_dir)
+        if export_pdf:
+            _ensure_dir(export_base / "sheets")
+
+    sheets: List[Dict[str, Any]] = []
+
+    # Figure aggregation
+    figure_count_total: Optional[int] = 0 if detect_figures else None
+
+    if export_png:
+        # Still renderer-agnostic per spec; PNG export not implemented in Phase 1.
+        qa_warnings.append(W_SEGMENTATION_NO_RENDERER)
+
+    if segment_drawings:
+        # Segmentation remains a stub; interface reserved.
+        qa_warnings.append(W_SEGMENTATION_NO_RENDERER)
+
+    if detect_figures:
+        # If OCR stack is unavailable, warn once and skip detection.
+        if _try_import_ocr_stack() is None:
+            qa_warnings.append(W_FIGURES_NO_OCR)
+            detect_figures = False
+            figure_count_total = None
+
+    for sheet_index, pdf_page_index in enumerate(sheet_page_indices):
+        page = reader.pages[pdf_page_index]
+
+        # Export single-page PDF if requested
+        export_pdf_path: Optional[str] = None
+        if export_base and export_pdf:
+            try:
+                writer = PdfWriter()
+                writer.add_page(page)
+                fname = f"sheet_{sheet_index + 1:03d}.pdf"
+                out_path = export_base / "sheets" / fname
+                with open(out_path, "wb") as f:
+                    writer.write(f)
+                export_pdf_path = str(out_path)
+            except Exception:
+                qa_warnings.append(W_EXPORT_FAILED)
+
+        # Extract page size points if available (optional evidence)
+        page_size_points: Optional[List[float]] = None
+        try:
+            w = float(page.mediabox.width)
+            h = float(page.mediabox.height)
+            page_size_points = [w, h]
+        except Exception:
+            page_size_points = None
+
+        # Figure detection via OCR (optional)
+        figures_block = {
+            "enabled": bool(detect_figures),
+            "count": None,
+            "items": [],
+        }
+
+        if detect_figures:
+            items, err = _ocr_detect_figures_on_page(
+                pdf_path=pdf_path,
+                pdf_page_index=pdf_page_index,
+                dpi=figure_ocr_dpi,
+            )
+            if err is not None:
+                qa_warnings.append(W_FIGURES_OCR_FAILED)
+                qa_info.setdefault("figure_ocr_errors", []).append(
+                    {"sheet_index": sheet_index, "pdf_page_index": pdf_page_index, "error": err}
+                )
+                figures_block["count"] = 0
+                figures_block["items"] = []
+            else:
+                figures_block["count"] = len(items)
+                figures_block["items"] = [
+                    {
+                        "label": it.label,
+                        "bbox_norm": it.bbox_norm,
+                        "confidence": it.confidence,
+                    }
+                    for it in items
+                ]
+                if len(items) == 0:
+                    qa_warnings.append(f"{W_FIGURES_NONE_ON_SHEET_PREFIX}{sheet_index}")
+
+            if figure_count_total is not None:
+                figure_count_total += int(figures_block["count"] or 0)
+
+        # Segmentation block (still stubbed)
+        segmentation_block = {
+            "enabled": bool(segment_drawings),
+            "drawing_count": None,
+            "drawings": [],
+        }
+
+        sheets.append(
+            {
+                "sheet_index": sheet_index,
+                "pdf_page_index": pdf_page_index,
+                "export": {
+                    "pdf_path": export_pdf_path,
+                    "png_path": None,
+                },
+                "page_size_points": page_size_points,
+                "figures": figures_block,
+                "segmentation": segmentation_block,
+            }
+        )
+
+    result = {
+        "drawing_sheets": {
+            "expected_sheet_count": expected_sheet_count,
+            "expected_sheet_count_source": expected_source,
+            "sheet_count": sheet_count,
+            "sheet_page_indices": sheet_page_indices,
+            "sheets": sheets,
+            "drawing_count_total": None,  # reserved for true segmentation (Phase 2)
+            "figure_count_total": figure_count_total,
+        },
+        "qa": {
+            "warnings": qa_warnings,
+            "info": {
+                **qa_info,
+                "pdf_num_pages": pdf_num_pages,
+                "export_dir": output_dir,
+                "segmentation_enabled": segment_drawings,
+                "figures_enabled": bool(detect_figures),
+                "figure_ocr_dpi": figure_ocr_dpi if detect_figures else None,
+                "start_index": start_index,
+            },
+        },
+    }
+
+    return result
+
+
+def canonical_drawing_sheets(result: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Canonicalize drawing-sheet output for golden tests.
+
+    Default canonical keys (Phase 1):
+      - expected_sheet_count
+      - sheet_count
+      - sheet_page_indices
+
+    Optional canonical keys when enabled:
+      - figure_count_total
+
+    Excludes volatile fields (export paths) and detailed per-figure boxes by default.
+    """
+    ds = result.get("drawing_sheets", {})
+
+    canonical: Dict[str, Any] = {
+        "expected_sheet_count": ds.get("expected_sheet_count"),
+        "sheet_count": ds.get("sheet_count"),
+        "sheet_page_indices": ds.get("sheet_page_indices"),
+    }
+
+    if ds.get("figure_count_total") is not None:
+        canonical["figure_count_total"] = ds.get("figure_count_total")
+
+    # If/when true segmentation is implemented:
+    if ds.get("drawing_count_total") is not None:
+        canonical["drawing_count_total"] = ds.get("drawing_count_total")
+
+    return canonical
