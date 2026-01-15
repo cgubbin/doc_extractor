@@ -1,0 +1,306 @@
+import pymupdf
+from dataclasses import dataclass
+from typing import Callable, Tuple, List, Union, Sequence
+from pymupdf import Document
+from enum import Enum
+
+
+StrFn = Callable[[str], str]
+
+
+class Column(Enum):
+    LEFT = "left"
+    RIGHT = "right"
+
+
+@dataclass(frozen=True, order=True)
+class Position:
+    """A point in the extracted text stream."""
+
+    page: int  # 0-based
+    column: Column  # LEFT/RIGHT
+    offset: int  # 0-based character offset within that column string
+
+
+@dataclass(frozen=True)
+class Segment:
+    page: int
+    column: Column
+    text: str
+    global_start: int  # inclusive
+    global_end: int  # exclusive
+
+
+@dataclass(frozen=True)
+class Span:
+    """Half-open span [start, end). Must be within the same page+column unless you use MultiSpan."""
+
+    start: Position
+    end: Position
+
+    def __post_init__(self) -> None:
+        # Basic sanity checks
+        if (self.start.page, self.start.column.value) != (
+            self.end.page,
+            self.end.column.value,
+        ):
+            raise ValueError(
+                "Span must be within one page+column. Use MultiSpan for cross-boundary spans."
+            )
+        if self.end.offset < self.start.offset:
+            raise ValueError("Span end must be >= start.")
+
+    @property
+    def page(self) -> int:
+        return self.start.page
+
+    @property
+    def column(self) -> Column:
+        return self.start.column
+
+    def __repr__(self) -> str:
+        return f"Span(p{self.page}:{self.column.value}@{self.start.offset}..{self.end.offset})"
+
+
+@dataclass(frozen=True)
+class MultiSpan:
+    """A collection of spans that together represent one logical selection."""
+
+    parts: tuple[Span, ...]
+
+    def __post_init__(self) -> None:
+        if not self.parts:
+            raise ValueError("MultiSpan must have at least one Span.")
+
+    def __repr__(self) -> str:
+        inner = ", ".join(repr(p) for p in self.parts)
+        return f"MultiSpan({inner})"
+
+
+Where = Union[Span, MultiSpan]
+
+
+def _span_sort_key(s: Span) -> Tuple[int, int, int, int]:
+    # page, column-order, start, end
+    col_ord = 0 if s.column is Column.LEFT else 1
+    return (s.page, col_ord, s.start.offset, s.end.offset)
+
+
+def trim_global_range(linear_text: str, start: int, end: int) -> Tuple[int, int]:
+    s = start
+    e = end
+    while s < e and linear_text[s].isspace():
+        s += 1
+    while e > s and linear_text[e - 1].isspace():
+        e -= 1
+    return s, e
+
+
+def global_range_to_where(
+    global_start: int, global_end: int, segments: List[Segment]
+) -> Union[Span, MultiSpan]:
+    """
+    Map [global_start, global_end) into Span(s) over (page, column, offset).
+    Separators are ignored; if a range falls into separator space, it will be clipped.
+    """
+    if global_end <= global_start:
+        raise ValueError("Empty/negative range")
+
+    parts: List[Span] = []
+
+    for seg in segments:
+        # overlap of [global_start, global_end) with [seg.global_start, seg.global_end)
+        a = max(global_start, seg.global_start)
+        b = min(global_end, seg.global_end)
+        if b <= a:
+            continue
+
+        start_pos = Position(seg.page, seg.column, a - seg.global_start)
+        end_pos = Position(seg.page, seg.column, b - seg.global_start)
+        parts.append(Span(start=start_pos, end=end_pos))
+
+    if not parts:
+        # Entirely in separators or out of bounds
+        raise ValueError("Range does not overlap any segment text")
+
+    if len(parts) == 1:
+        return parts[0]
+    return MultiSpan(parts=tuple(parts))
+
+
+def merge_where(a: Where, b: Where) -> Where:
+    """
+    Merge two Where objects into a single Where.
+    - If they can be coalesced (adjacent/overlapping within same page+column), do so.
+    - Otherwise return a MultiSpan with ordered, coalesced parts.
+    """
+    parts: List[Span] = []
+    parts.extend(a.parts if isinstance(a, MultiSpan) else (a,))
+    parts.extend(b.parts if isinstance(b, MultiSpan) else (b,))
+    parts.sort(key=_span_sort_key)
+    parts = coalesce_spans(parts)
+    return parts[0] if len(parts) == 1 else MultiSpan(parts=tuple(parts))
+
+
+def coalesce_spans(spans: Sequence[Span]) -> List[Span]:
+    """Coalesce overlapping/adjacent spans when they share the same page+column."""
+    if not spans:
+        return []
+    out: List[Span] = []
+    cur = spans[0]
+    for s in spans[1:]:
+        if (s.page, s.column) == (
+            cur.page,
+            cur.column,
+        ) and s.start.offset <= cur.end.offset:
+            # overlap/adjacent (adjacent if s.start == cur.end)
+            new_end = Position(cur.page, cur.column, max(cur.end.offset, s.end.offset))
+            cur = Span(cur.start, new_end)
+        elif (s.page, s.column) == (
+            cur.page,
+            cur.column,
+        ) and s.start.offset == cur.end.offset:
+            new_end = Position(cur.page, cur.column, s.end.offset)
+            cur = Span(cur.start, new_end)
+        else:
+            out.append(cur)
+            cur = s
+    out.append(cur)
+    return out
+
+
+@dataclass(frozen=True)
+class TwoColumnRead:
+    left: str
+    right: str
+
+    def pipe(self, *funcs: StrFn) -> "TwoColumnRead":
+        left = self.left
+        right = self.right
+        for fn in funcs:
+            left = fn(left)
+            right = fn(right)
+        return TwoColumnRead(left=left, right=right)
+
+    def full_text(self) -> str:
+        return f"{self.left}\n{self.right}"
+
+
+@dataclass(frozen=True)
+class MultiPageRead:
+    pages: list[TwoColumnRead]
+
+    def pipe(self, *funcs: StrFn) -> "MultiPageRead":
+        pages = [each.pipe(funcs) for each in self.pages]
+        return MultiPageRead(pages=pages)
+
+    def full_text(self) -> str:
+        return "\n".join(page.full_text() for page in self.pages)
+
+    def __len__(self) -> int:
+        return len(self.pages)
+
+    def get_column_text(self, page: int, column: Column) -> str:
+        p = self.pages[page]
+        return p.left if column is Column.LEFT else p.right
+
+    def slice_span(self, span: Span) -> str:
+        text = self.get_column_text(span.start.page, span.start.column)
+        return text[span.start.offset : span.end.offset]
+
+    def slice_where(self, where: Span | MultiSpan, joiner: str = "") -> str:
+        if isinstance(where, Span):
+            return self.slice_span(where)
+        return joiner.join(self.slice_span(s) for s in where.parts)
+
+    def iter_segments(
+        self, order: Tuple[Column, Column] = (Column.LEFT, Column.RIGHT)
+    ) -> List[Tuple[int, Column, str]]:
+        out: List[Tuple[int, Column, str]] = []
+        for pageno, page in enumerate(self.pages):
+            for col in order:
+                txt = page.left if col is Column.LEFT else page.right
+                out.append((pageno, col, txt))
+        return out
+
+    def linearize(
+        self,
+        sep: str = "\n",
+        order: Tuple[Column, Column] = (Column.LEFT, Column.RIGHT),
+    ) -> Tuple[str, List[Segment]]:
+        """
+        Returns:
+          - linear_text: concatenated text
+          - segments: metadata for each chunk so we can map global offsets -> Position
+        """
+        seg_meta: List[Segment] = []
+        chunks: List[str] = []
+        cursor = 0
+
+        for page, col, txt in self.iter_segments(order=order):
+            chunks.append(txt)
+            seg = Segment(
+                page=page,
+                column=col,
+                text=txt,
+                global_start=cursor,
+                global_end=cursor + len(txt),
+            )
+            seg_meta.append(seg)
+            cursor = seg.global_end
+
+            # separator is NOT attributable to any segment; it’s just a boundary marker
+            chunks.append(sep)
+            cursor += len(sep)
+
+        linear_text = "".join(chunks)
+        return linear_text, seg_meta
+
+
+def extract_pages_text(
+    document: Document,
+    page_range: range,
+    *,
+    header_margin: float = 25,
+    footer_margin: float = 25,
+) -> MultiPageRead:
+    pages = []
+    for each in page_range:
+        pages.append(
+            extract_page_text(
+                document, each, header_margin=header_margin, footer_margin=footer_margin
+            )
+        )
+
+    return MultiPageRead(pages=pages)
+
+
+def extract_page_text(
+    document: Document,
+    page_index: int,
+    *,
+    header_margin: float = 25,
+    footer_margin: float = 25,
+) -> TwoColumnRead:
+    """
+    Reconstruct text order for USPTO-style two-column pages:
+      - group fragments into lines by y (within y_tol)
+      - split each line into left/right by a robust x_split
+      - emit left column top-to-bottom, then right column top-to-bottom
+    """
+    page = document.load_page(page_index)
+
+    (x0, y0, x1, y1) = page.mediabox
+
+    left_col_mediabox = pymupdf.Rect(
+        x0, y0 - header_margin, x0 + (x1 - x0) / 2, y1 + footer_margin
+    )
+
+    right_col_mediabox = pymupdf.Rect(
+        x0 + (x1 - x0) / 2, y0 - header_margin, x1, y1 + footer_margin
+    )
+
+    left_text = page.get_textbox(left_col_mediabox)
+    right_text = page.get_textbox(right_col_mediabox)
+
+    return TwoColumnRead(left=left_text, right=right_text)

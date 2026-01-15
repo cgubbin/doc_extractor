@@ -2,15 +2,11 @@ import json
 import os
 import glob
 from typing import Any, Dict
-from pypdf import PdfReader
+import pymupdf
 import re
 from difflib import SequenceMatcher
 
-from patent_ingest.parse_front_page import (
-    canonical_front_page,
-    extract_page_text,
-    parse_front_matter,
-)
+from patent_ingest.pipeline import _build_front_matter_pages_text
 
 ROOT = os.path.dirname(os.path.dirname(__file__))
 SAMPLES_DIR = os.path.join(ROOT, "..", "corpus", "samples")
@@ -80,15 +76,15 @@ def test_golden_front_pages_exact_match():
 
         assert os.path.exists(pdf_path), f"Missing sample PDF: {pdf_path}"
 
-        reader = PdfReader(pdf_path)
+        doc = pymupdf.open(pdf_path)
 
         N = expected.get("front_matter_pages_to_scan", 3)
-        N = min(N, len(reader.pages))
+        N = min(N, doc.page_count)
         expected.pop("front_matter_pages_to_scan", None)
-        pages_text = [extract_page_text(reader, i, is_front_page=(i == 0)) for i in range(N)]
-        parsed = parse_front_matter(pages_text, max_pages=N)
+        text = _build_front_matter_pages_text(doc, pages_to_scan=N)
+        parsed = text.parse()
 
-        got = canonical_front_page(parsed)
+        got = parsed.canonical()
 
         title_expected = expected.pop("title", None)
         title_got = got.pop("title", None)
@@ -118,7 +114,8 @@ def test_golden_front_pages_exact_match():
             failures.append(f"\n=== GOLDEN MISMATCH: {patent_id} ===\n{diff}")
 
     if failures:
-        full_msg = f"\n{len(failures)} golden front-page mismatches detected:\n" + "\n".join(
-            failures
+        full_msg = (
+            f"\n{len(failures)} golden front-page mismatches detected:\n"
+            + "\n".join(failures)
         )
         raise AssertionError(full_msg)

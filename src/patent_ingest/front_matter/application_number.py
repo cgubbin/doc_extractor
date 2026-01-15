@@ -1,0 +1,318 @@
+from __future__ import annotations
+
+import re
+from typing import Any, Optional, Tuple
+
+from patent_ingest.model.document import MultiPage
+from patent_ingest.model.span import Span, Column, Position, Where
+from patent_ingest.parsed import ParsedRaw, ParsedNorm, INIDKind, EntityKind
+
+
+# =============================================================================
+# Application number + filing date + grant date (INID + fallback regex)
+# =============================================================================
+
+APPL_NO_FALLBACK_PAT = re.compile(
+    r"\bAppl\s*\.\s*No\s*\.\s*:\s*([0-9]{2}\s*/\s*[0-9\s*,\s*]{3,7}[0-9]{3})\b",
+    re.IGNORECASE,
+)
+
+# Headings that frequently follow (21) and can contaminate the INID slice
+APPL_STOP_PAT = re.compile(
+    r"\b(OTHER\s+PUBLICATIONS|U\.S\.\s*PATENT\s*DOCUMENTS|FOREIGN\s+PATENT\s*DOCUMENTS|"
+    r"REFERENCES\s+CITED|ABSTRACT|Primary\s+Examiner|Assistant\s+Examiner)\b",
+    re.IGNORECASE,
+)
+
+# Labels to strip if they appear at the start of the INID slice
+APPL_LABELS = ["Appl. No.", "Appl No.", "Application No.", "Application No"]
+
+
+# --------------------------
+# Normalization + validation
+# --------------------------
+
+
+def normalize_us_application_no(raw: str) -> Optional[str]:
+    """
+    Normalize variants like '13 / 766 , 598' -> '13/766,598'
+    Also fixes OCR-added leading zeros on the prefix, e.g. '016/197,849' -> '16/197,849'
+    """
+    if not raw:
+        return None
+
+    s = raw.upper()
+    s = s.replace("O", "0")
+    s = re.sub(r"\s+", "", s)
+    s = re.sub(r"[^0-9/,]", "", s)
+
+    if s.count("/") != 1:
+        return None
+
+    left, right = s.split("/", 1)
+    if not left.isdigit():
+        return None
+
+    # Fix: OCR can add an erroneous leading '0' making prefix 3+ digits (e.g. 016/...)
+    if len(left) > 2:
+        left2 = left.lstrip("0")
+        left = left2 if left2 else "0"
+
+    right_digits = re.sub(r"[^0-9]", "", right)
+    if not right_digits.isdigit():
+        return None
+
+    if len(right_digits) >= 6:
+        main = right_digits[:-3]
+        tail = right_digits[-3:]
+        return f"{left}/{main},{tail}"
+    else:
+        return f"{left}/{right_digits}"
+
+
+def validate_us_application_no_text(text: str) -> bool:
+    """
+    Treat as valid if normalization succeeds OR if it matches the fallback pattern somewhere.
+    """
+    s = " ".join((text or "").split())
+    if normalize_us_application_no(s):
+        return True
+    return bool(APPL_NO_FALLBACK_PAT.search(s))
+
+
+# --------------------------
+# Text cleaning with span refinement
+# --------------------------
+
+
+def _cut_at_heading_with_idx(s: str, stop_pat: re.Pattern[str]) -> Tuple[str, int]:
+    """
+    Cut string at first stop heading match. Returns (cut_text, end_index_in_original).
+    If no heading, end_index = len(s).
+    """
+    m = stop_pat.search(s or "")
+    if not m:
+        return s, len(s)
+    return s[: m.start()], m.start()
+
+
+def _strip_leading_label_with_idx(s: str, labels: list[str]) -> Tuple[str, int]:
+    """
+    If any label appears at the beginning (ignoring leading whitespace), strip it and return
+    (stripped_text, start_index_in_original).
+    Otherwise return (s, 0).
+    """
+    if not s:
+        return s, 0
+
+    # Preserve original index by accounting for leading whitespace
+    lead_ws = len(s) - len(s.lstrip())
+    ss = s.lstrip()
+
+    for lab in labels:
+        # Flexible match: ignore spacing and punctuation differences lightly
+        if ss.lower().startswith(lab.lower()):
+            cut = ss[len(lab) :]
+            # Strip common separators after label
+            cut2 = cut.lstrip(" :\t\r\n")
+            # index where cut2 begins in original string
+            # original: [lead_ws] + label + [len(cut)-len(cut2)]
+            start_idx = lead_ws + len(lab) + (len(cut) - len(cut2))
+            return cut2, start_idx
+
+    return s, 0
+
+
+def _refine_where_by_slice(
+    raw: ParsedRaw[str], start_idx: int, end_idx: int
+) -> Tuple[Where, dict[str, Any]]:
+    """
+    Try to refine raw.where to correspond to raw.text[start_idx:end_idx].
+
+    - If raw.where is Span, return a new Span with shifted offsets.
+    - If raw.where is MultiSpan, keep it (truthful) and record indices for debugging.
+    """
+    meta: dict[str, Any] = {"refine": {"start_idx": start_idx, "end_idx": end_idx}}
+
+    if isinstance(raw.where, Span):
+        # Safe offset shift within the same page+column evidence
+        new_start = Position(
+            raw.where.start.page,
+            raw.where.start.column,
+            raw.where.start.offset + start_idx,
+        )
+        new_end = Position(
+            raw.where.end.page, raw.where.end.column, raw.where.start.offset + end_idx
+        )
+        return Span(new_start, new_end), meta
+
+    # MultiSpan: we can’t reliably map substring indices across parts without extra machinery
+    return raw.where, meta
+
+
+def _clean_application_slice(raw: ParsedRaw[str]) -> ParsedRaw[str]:
+    """
+    Apply:
+      - strip leading label
+      - cut at heading
+      - whitespace trim
+    And attempt to refine the span if possible.
+    """
+    original = raw.text or ""
+    s = original
+
+    # 1) strip label
+    s1, strip_idx = _strip_leading_label_with_idx(s, APPL_LABELS)
+
+    # 2) cut at heading
+    s2, cut_end_rel = _cut_at_heading_with_idx(s1, APPL_STOP_PAT)
+
+    # 3) final trim
+    s3 = s2.strip()
+
+    # Map trimming back to indices in s2
+    # Compute trim offsets relative to s2
+    left_trim = len(s2) - len(s2.lstrip())
+    right_trim = len(s2.rstrip())
+
+    # Compute overall slice indices relative to original string
+    # original -> (strip label) -> s1, so s1 corresponds to original[strip_idx:]
+    start_idx = strip_idx + left_trim
+    end_idx = strip_idx + right_trim  # right_trim is length of rstripped s2
+
+    # If we cut early, right_trim should not exceed cut_end_rel
+    end_idx = min(end_idx, strip_idx + cut_end_rel)
+
+    # If after cleaning it became empty, just return with empty text (no refinement needed)
+    if not s3:
+        return raw.with_text("", cleaned=True)
+
+    where2, refine_meta = _refine_where_by_slice(raw, start_idx, end_idx)
+    return ParsedRaw[str](
+        kind=raw.kind,
+        where=where2,
+        text=s3,
+        confidence=raw.confidence,
+        meta={**raw.meta, **refine_meta, "cleaned": True},
+    )
+
+
+# --------------------------
+# Fallback search in the document region
+# --------------------------
+
+
+def find_first_application_no_fallback(doc: MultiPage) -> Optional[ParsedRaw[str]]:
+    """
+    Your stated heuristic: “first suitable substring in the second column of the first page”.
+    This uses the APPL_NO_FALLBACK_PAT capturing group and returns that group as the span/text.
+    """
+    text = doc.get_column_text(page=0, column=Column.LEFT)
+    m = APPL_NO_FALLBACK_PAT.search(text or "")
+    if not m:
+        return None
+
+    start, end = m.span(1)
+    where = Span(
+        start=Position(page=0, column=Column.LEFT, offset=start),
+        end=Position(page=0, column=Column.LEFT, offset=end),
+    )
+    return ParsedRaw[str](
+        kind=EntityKind.APPLICATION_ID,
+        where=where,
+        text=text[start:end].strip(),
+        confidence=0.35,
+        meta={
+            "source": "fallback",
+            "rule": "appl-no:first-match page0/right",
+            "pattern": APPL_NO_FALLBACK_PAT.pattern,
+        },
+    )
+
+
+# --------------------------
+# Main extractor: INID if valid, else fallback
+# --------------------------
+
+
+def extract_application_number(
+    doc: MultiPage,
+    inid_blocks: dict[INIDKind, ParsedRaw[str]],
+) -> Optional[ParsedNorm[str]]:
+    """
+    Returns ParsedNorm[str] where value is a normalized US application number if possible,
+    else best cleaned value. Provenance is preserved in where/raw_text/meta.
+
+    Policy:
+      - Prefer INID (21) IF it cleans to something that validates.
+      - If INID(21) exists but is invalid -> record rejection and fallback.
+      - Fallback: first match in page0/right, then validate/normalize.
+    """
+    rejections: list[dict[str, Any]] = []
+
+    # 1) Try INID(21) if available
+    inid21 = inid_blocks.get(INIDKind._21) if hasattr(INIDKind, "_21") else None
+    if inid21:
+        cleaned = _clean_application_slice(
+            inid21.retag(
+                EntityKind.APPLICATION_ID, rule="retag INID(21)->APPLICATION_ID"
+            )
+        )
+        if cleaned.text:
+            if validate_us_application_no_text(cleaned.text):
+                norm = normalize_us_application_no(cleaned.text)
+                value = norm or cleaned.text
+                return cleaned.normalize_to(
+                    value=value,
+                    kind=EntityKind.APPLICATION_ID,
+                    system="USPTO",
+                    rule="appl-no:from-inid21",
+                    normalized=bool(norm),
+                    normalized_value=norm,
+                    rejections=rejections,
+                    source="inid",
+                    inid_code="21",
+                )
+            else:
+                rejections.append(
+                    {
+                        "source": "inid",
+                        "inid_code": "21",
+                        "reason": "invalid application number format after cleaning",
+                        "sample": cleaned.excerpt(120),
+                    }
+                )
+
+    # 2) Fallback: first suitable substring in page0/right
+    fb = find_first_application_no_fallback(doc)
+    if not fb or not fb.text:
+        return None
+
+    cleaned_fb = _clean_application_slice(fb)  # usually no-op, but consistent
+    if not validate_us_application_no_text(cleaned_fb.text):
+        # Still return something if you want “best effort”; or return None.
+        # Here: best-effort with validated=False.
+        return cleaned_fb.normalize_to(
+            value=cleaned_fb.text,
+            kind=EntityKind.APPLICATION_ID,
+            system="USPTO",
+            rule="appl-no:fallback-but-invalid",
+            normalized=False,
+            normalized_value=None,
+            rejections=rejections,
+            source="fallback",
+            validation_error="invalid application number format",
+        )
+
+    norm = normalize_us_application_no(cleaned_fb.text)
+    value = norm or cleaned_fb.text
+    return cleaned_fb.normalize_to(
+        value=value,
+        kind=EntityKind.APPLICATION_ID,
+        system="USPTO",
+        rule="appl-no:fallback",
+        normalized=bool(norm),
+        normalized_value=norm,
+        rejections=rejections,
+        source="fallback",
+    )

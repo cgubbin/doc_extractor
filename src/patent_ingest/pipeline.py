@@ -29,7 +29,10 @@ from pypdf import PdfReader
 
 # --- Imports from your existing modules ---
 # Adjust these import paths if your package structure differs.
-from patent_ingest.parse_front_page import parse_front_matter, extract_page_text
+from patent_ingest.parse_front_page import (
+    parse_front_matter,
+)
+from patent_ingest.front_matter.model import FrontMatter
 from patent_ingest.parse_body import parse_patent_body
 from patent_ingest.drawing_sheets import process_drawing_sheets
 from patent_ingest.utils import infer_drawings_start_index
@@ -82,14 +85,15 @@ def _build_front_matter_pages_text(
     reader: PdfReader,
     *,
     pages_to_scan: int,
-) -> List[str]:
+) -> FrontMatter:
     # n = min(pages_to_scan, len(reader.pages))
     n = min(pages_to_scan, reader.page_count)
-    pages_text: List[str] = []
-    for i in range(n):
-        # Keep parity with your existing code: front-page flag only for page 0
-        pages_text.append(extract_page_text(reader, i, is_front_page=(i == 0)) or "")
-    return pages_text
+    # pages = [extract_page0_text(reader)]
+    # for i in range(1, n):
+    # Keep parity with your existing code: front-page flag only for page 0
+    # pages.append(extract_front_matter_text(reader, i, is_front_page=False) or "")
+
+    return FrontMatter(reader, range(n))
 
 
 def ingest_patent_pdf(
@@ -126,18 +130,18 @@ def ingest_patent_pdf(
     # -----------------------
     # Step 1: minimal parse (page 0 only) to get reported drawing sheet count (and claim count)
     # -----------------------
-    pages_text_min = _build_front_matter_pages_text(
+    front_matter = _build_front_matter_pages_text(
         doc, pages_to_scan=min(1, pdf_num_pages)
     )
+    parsed = front_matter.parse()
+    print("=== Initial Front-matter parsing complete ===")
+    print(parsed)
+    raise NotImplementedError("Update to use your existing front-matter parsing logic")
     front_min = parse_front_matter(pages_text_min, max_pages=len(pages_text_min))
 
     reported_counts = front_min.get("reported_counts") or {}
     expected_sheet_count = reported_counts.get("reported_drawing_sheet_count")
     expected_claim_count = reported_counts.get("reported_claim_count")
-
-    print("=== Initial Front-matter parsing complete ===")
-    print(front_min)
-    raise NotImplementedError("Update imports and helper calls as needed.")
 
     # -----------------------
     # Step 1b: determine front-matter boundary (drawings_start_index)

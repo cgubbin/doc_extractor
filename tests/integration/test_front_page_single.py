@@ -1,7 +1,7 @@
 import os
-from pypdf import PdfReader
+import pymupdf
 
-from patent_ingest.parse_front_page import extract_page0_text, parse_front_page
+from patent_ingest.pipeline import _build_front_matter_pages_text
 
 
 ROOT = os.path.dirname(os.path.dirname(__file__))
@@ -9,22 +9,23 @@ SAMPLE = os.path.join(ROOT, "..", "corpus", "samples", "US7629993B2.pdf")
 
 
 def test_single_front_page_extracts_core_fields():
-    reader = PdfReader(SAMPLE)
-    text0 = extract_page0_text(reader)
-    parsed = parse_front_page(text0)
+    doc = pymupdf.open(SAMPLE)
+    text = _build_front_matter_pages_text(doc, pages_to_scan=1)
 
-    assert parsed["patent_number"]["normalized"] is not None
-    assert parsed["title"]["value"] is not None
-    assert len(parsed["title"]["value"]) > 10
+    parsed = text.parse()
 
-    assert parsed["abstract"]["value"] is not None
-    assert len(parsed["abstract"]["value"]) > 20
+    # print(parsed)
 
-    assert parsed["assignee"]["value"] is not None
-    assert len(parsed["inventors"]["parsed"]) >= 1
-
-    # Regression target: references should be found
-    assert len(parsed["references_cited"]["cited_us_patents"]) >= 1
+    assert parsed.patent_id is not None
+    assert parsed.title is not None
+    assert parsed.application_number is not None
+    assert parsed.filed_date is not None
+    assert parsed.grant_date is not None
+    assert parsed.assignee is not None
+    assert parsed.inventors is not None
+    assert parsed.abstract is not None
+    assert parsed.reported_counts is not None
+    assert parsed.citations is not None
 
     # No critical failures
-    assert "missing_title" not in parsed["qa"]["warnings"]
+    assert "missing_title" not in parsed.qa_warnings

@@ -29,9 +29,34 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
-from patent_ingest.two_column import extract_ordered_two_column_text
+from patent_ingest.model.document import (
+    MultiPage,
+    TwoColumn,
+    Column,
+)
+from patent_ingest.model.mapping import (
+    linearize,
+    global_range_to_where,
+    trim_global_range,
+)
+
+
+class PatentNumber:
+    def __init__(self, raw: str):
+        self.raw = raw
+        self.normalized = normalize_us_patent_header(raw)
+        self.digits = normalize_patent_number_digits(raw)
+
+    def __str__(self) -> str:
+        return self.normalized or self.raw or ""
+
+    def kind_code(self) -> Optional[str]:
+        if not self.normalized:
+            return None
+        m = KIND_CODE_PAT.search(self.raw)
+        return m.group(1) if m else None
 
 
 # =============================================================================
@@ -114,15 +139,12 @@ def extract_page0_text(pdf_reader: Any) -> str:
     Extract and clean page 0 text from a pypdf PdfReader.
     """
     # page0 = pdf_reader.pages[0]
-    # t = page0.extract_text() or ""
-    t = extract_ordered_two_column_text(pdf_reader, 0) or ""
-    t = dehyphenate(t)
-    t = strip_front_page_noise(t)
-    t = normalize_whitespace(t)
+    t = TwoColumn(pdf_reader, 0) or ""
+    # t = t.pipe(dehyphenate, strip_front_page_noise, normalize_whitespace)
     return t
 
 
-def extract_page_text(
+def extract_front_matter_text(
     pdf_reader: Any, page_index: int, *, is_front_page: bool = False
 ) -> str:
     """
@@ -131,14 +153,11 @@ def extract_page_text(
     """
     # page = pdf_reader.pages[page_index]
     # t = page.extract_text() or ""
-    t = extract_ordered_two_column_text(pdf_reader, page_index) or ""
-    t = dehyphenate(t)
-    if is_front_page or page_index == 0:
-        t = strip_front_page_noise(t)
-    else:
-        # Light cleaning only (keep content that might include continued references)
-        t = normalize_whitespace(t)
-    t = normalize_whitespace(t)
+    t = TwoColumn(pdf_reader, page_index) or ""
+    # t = t.pipe(dehyphenate)
+    # if is_front_page or page_index == 0:
+    # t = t.pipe(strip_front_page_noise)
+    # t = t.pipe(normalize_whitespace)
     return t
 
 
@@ -185,6 +204,53 @@ def parse_inid_blocks(front_text: str) -> Dict[str, Dict[str, Any]]:
         value = front_text[start:end].strip()
         if code not in blocks and value:
             blocks[code] = {"text": value, "span": {"start": start, "end": end}}
+    return blocks
+
+
+INID_MARKER_PAT = re.compile(r"\(\s*(\d{2})\s*\)")
+
+
+def parse_inid_blocks_doc(
+    doc: MultiPage,
+    *,
+    sep: str = "\n",
+    order: Tuple[Column, Column] = (Column.LEFT, Column.RIGHT),
+) -> Dict[str, Dict[str, Any]]:
+    """
+    Returns dict: code -> { "text": str, "where": Span|MultiSpan, "global": (start,end) }
+    'where' points into the original (page,column,offset) coordinate system.
+
+    NOTE: Since your PDF extraction may interleave columns imperfectly, this is still a heuristic—
+    but now spans are truthful about where the text came from.
+    """
+    linear_text, segments = linearize(doc, sep=sep, order=order)
+    matches = list(INID_MARKER_PAT.finditer(linear_text))
+
+    blocks: Dict[str, Dict[str, Any]] = {}
+    for i, m in enumerate(matches):
+        code = m.group(1)
+
+        # block payload starts after marker, ends at next marker (or EOF)
+        raw_start = m.end()
+        raw_end = matches[i + 1].start() if i + 1 < len(matches) else len(linear_text)
+        # Compute trimmed range so where matches the stored text exactly
+        t_start, t_end = trim_global_range(linear_text, raw_start, raw_end)
+
+        if t_end <= t_start:
+            continue  # block contains only whitespace
+
+        value = linear_text[t_start:t_end]
+        if code in blocks or not value:
+            continue
+
+        where = global_range_to_where(t_start, t_end, segments)
+
+        blocks[code] = {
+            "text": value,
+            "where": where,  # now aligned with "text"
+            "global": (t_start, t_end),
+        }
+
     return blocks
 
 
@@ -1426,6 +1492,9 @@ def parse_front_matter(pages_text: List[str], *, max_pages: int = 3) -> Dict[str
     """
     if not pages_text:
         return parse_front_page("")
+
+    result = pages_text.parse()
+    raise TypeError("pages_text must be a list of strings")
 
     # Limit pages scanned for front matter
     limit = min(len(pages_text), max_pages)
