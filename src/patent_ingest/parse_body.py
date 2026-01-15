@@ -535,7 +535,10 @@ def _extract_figure_ids(text: str) -> List[str]:
         return []
 
     ids: List[str] = []
+    print(text)
+    raise NotImplementedError("")
     for m in _FIG_REF_RE.finditer(text):
+        print(m)
         figlist = m.group("figlist")
         try:
             # Reuse the same figlist parsing used for drawing descriptions.
@@ -638,7 +641,10 @@ def parse_patent_body(
 
     texts: List[str] = []
     for i in range(start_used, num_pages):
-        page_text = reader.pages[i].extract_text() or ""
+        from patent_ingest.two_column import extract_page_text_two_column
+
+        page_text = extract_page_text_two_column(reader, i)
+        # page_text = reader.pages[i].extract_text() or ""
         texts.append(page_text)
 
     body_text = _normalize_text("\n".join(texts))

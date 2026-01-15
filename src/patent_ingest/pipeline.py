@@ -83,7 +83,8 @@ def _build_front_matter_pages_text(
     *,
     pages_to_scan: int,
 ) -> List[str]:
-    n = min(pages_to_scan, len(reader.pages))
+    # n = min(pages_to_scan, len(reader.pages))
+    n = min(pages_to_scan, reader.page_count)
     pages_text: List[str] = []
     for i in range(n):
         # Keep parity with your existing code: front-page flag only for page 0
@@ -113,21 +114,30 @@ def ingest_patent_pdf(
         qa
       }
     """
+    import pymupdf  # noqa: F401
+
     pdf_path = str(pdf_path)
     out_root = _safe_mkdir(output_dir)
 
     reader = PdfReader(pdf_path)
+    doc = pymupdf.open(pdf_path)
     pdf_num_pages = len(reader.pages)
 
     # -----------------------
     # Step 1: minimal parse (page 0 only) to get reported drawing sheet count (and claim count)
     # -----------------------
-    pages_text_min = _build_front_matter_pages_text(reader, pages_to_scan=min(1, pdf_num_pages))
+    pages_text_min = _build_front_matter_pages_text(
+        doc, pages_to_scan=min(1, pdf_num_pages)
+    )
     front_min = parse_front_matter(pages_text_min, max_pages=len(pages_text_min))
 
     reported_counts = front_min.get("reported_counts") or {}
     expected_sheet_count = reported_counts.get("reported_drawing_sheet_count")
     expected_claim_count = reported_counts.get("reported_claim_count")
+
+    print("=== Initial Front-matter parsing complete ===")
+    print(front_min)
+    raise NotImplementedError("Update imports and helper calls as needed.")
 
     # -----------------------
     # Step 1b: determine front-matter boundary (drawings_start_index)
@@ -175,7 +185,9 @@ def ingest_patent_pdf(
     expected_sheet_count = reported_counts_full.get(
         "reported_drawing_sheet_count", expected_sheet_count
     )
-    expected_claim_count = reported_counts_full.get("reported_claim_count", expected_claim_count)
+    expected_claim_count = reported_counts_full.get(
+        "reported_claim_count", expected_claim_count
+    )
 
     # -----------------------
     # Step 2: drawing sheets
@@ -197,7 +209,9 @@ def ingest_patent_pdf(
         export_png=config.export_png,
     )
 
-    drawing_sheets = drawings.get("drawing_sheets") if isinstance(drawings, dict) else drawings
+    drawing_sheets = (
+        drawings.get("drawing_sheets") if isinstance(drawings, dict) else drawings
+    )
     sheet_count = (drawing_sheets or {}).get("sheet_count")
     drawing_count_total = (drawing_sheets or {}).get(
         "drawing_count_total"
@@ -206,7 +220,11 @@ def ingest_patent_pdf(
     # Determine body start index deterministically:
     # if we know drawings start and count, body starts right after drawings.
     body_start_index = None
-    if isinstance(drawings_start_index, int) and isinstance(sheet_count, int) and sheet_count > 0:
+    if (
+        isinstance(drawings_start_index, int)
+        and isinstance(sheet_count, int)
+        and sheet_count > 0
+    ):
         body_start_index = drawings_start_index + sheet_count
 
     # -----------------------
@@ -248,7 +266,10 @@ def ingest_patent_pdf(
     )
 
     assembled = assemble_parsed_patent(
-        pdf_path=pdf_path, front_matter=front, drawing_result=drawings, body_result=patent_body
+        pdf_path=pdf_path,
+        front_matter=front,
+        drawing_result=drawings,
+        body_result=patent_body,
     )
 
     print("=== Ingestion complete ===")

@@ -3,4 +3,6 @@ Name: patent_ingest
 Version: 0.1.0
 Summary: Patent PDF parsing (front matter, drawings, body)
 Requires-Python: >=3.10
+Requires-Dist: pymupdf-layout>=1.26.6
+Requires-Dist: pymupdf4llm>=0.2.9
 Requires-Dist: pypdf

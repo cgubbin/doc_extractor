@@ -31,7 +31,7 @@ import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from patent_ingest.two_column import extract_page_text_two_column
+from patent_ingest.two_column import extract_ordered_two_column_text
 
 
 # =============================================================================
@@ -115,21 +115,23 @@ def extract_page0_text(pdf_reader: Any) -> str:
     """
     # page0 = pdf_reader.pages[0]
     # t = page0.extract_text() or ""
-    t = extract_page_text_two_column(pdf_reader, 0) or ""
+    t = extract_ordered_two_column_text(pdf_reader, 0) or ""
     t = dehyphenate(t)
     t = strip_front_page_noise(t)
     t = normalize_whitespace(t)
     return t
 
 
-def extract_page_text(pdf_reader: Any, page_index: int, *, is_front_page: bool = False) -> str:
+def extract_page_text(
+    pdf_reader: Any, page_index: int, *, is_front_page: bool = False
+) -> str:
     """
     Extract and clean a page from a pypdf PdfReader.
     For now, use the same cleaning approach; callers may add body-specific stripping later.
     """
     # page = pdf_reader.pages[page_index]
     # t = page.extract_text() or ""
-    t = extract_page_text_two_column(pdf_reader, page_index) or ""
+    t = extract_ordered_two_column_text(pdf_reader, page_index) or ""
     t = dehyphenate(t)
     if is_front_page or page_index == 0:
         t = strip_front_page_noise(t)
@@ -235,7 +237,9 @@ def parse_uspto_date_to_iso(raw: str) -> Optional[str]:
 # Patent number normalization
 # =============================================================================
 
-PATENT_HEADER_PAT = re.compile(r"\bUS\s+[\d,\s]{7,15}\s+[A-Z]\d\b")  # e.g., "US 9,587,932 B2"
+PATENT_HEADER_PAT = re.compile(
+    r"\bUS\s+[\d,\s]{7,15}\s+[A-Z]\d\b"
+)  # e.g., "US 9,587,932 B2"
 KIND_CODE_PAT = re.compile(r"\b([A-Z]\d)\b")
 
 
@@ -353,7 +357,9 @@ TITLE_TABLE_STOP_PAT = re.compile(
 
 # Remove only the interleaved (56) references label inside the title
 INTERLEAVED_REFS_PAT = re.compile(r"\(\s*56\s*\)\s*References\s*Cited\b", re.IGNORECASE)
-US_PATENT_DOCS_PAT = re.compile(r"\s*U\s*\.\s*S\s*\.\s*PATENT\s*DOCUMENTS", re.IGNORECASE)
+US_PATENT_DOCS_PAT = re.compile(
+    r"\s*U\s*\.\s*S\s*\.\s*PATENT\s*DOCUMENTS", re.IGNORECASE
+)
 BARE_REFS_CITED_PAT = re.compile(r"\bReferences\s+Cited\b", re.IGNORECASE)
 
 # If (71) is printed as "(71) Applicant:" on some docs, we want to stop at "(71)" regardless.
@@ -529,7 +535,9 @@ def split_name_and_location(raw: str) -> Dict[str, Optional[str]]:
 
 def parse_inventors(raw_inventors_text: str) -> List[Dict[str, Optional[str]]]:
     raw_inventors_text = raw_inventors_text or ""
-    chunks = [c.strip() for c in INVENTOR_SPLIT_PAT.split(raw_inventors_text) if c.strip()]
+    chunks = [
+        c.strip() for c in INVENTOR_SPLIT_PAT.split(raw_inventors_text) if c.strip()
+    ]
     out: List[Dict[str, Optional[str]]] = []
     for c in chunks:
         parts = split_name_and_location(c)
@@ -591,7 +599,9 @@ COUNTRY_TAG_THEN_REFS_DATE_PAT = re.compile(
 COUNTRY_TAG_PAT = re.compile(r"\(\s*[A-Z]{2}\s*\)\s*$")
 
 
-def extract_inventors(front_text: str, inid_blocks: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+def extract_inventors(
+    front_text: str, inid_blocks: Dict[str, Dict[str, Any]]
+) -> Dict[str, Any]:
     """
     Inventors may appear under:
     - (72)
@@ -605,7 +615,9 @@ def extract_inventors(front_text: str, inid_blocks: Dict[str, Dict[str, Any]]) -
         raw = inid_blocks["75"]["text"].strip()
         span = inid_blocks["75"]["span"]
     else:
-        m = re.search(r"\bInventors?\s*[:\-]\s*(.+)", front_text or "", flags=re.IGNORECASE)
+        m = re.search(
+            r"\bInventors?\s*[:\-]\s*(.+)", front_text or "", flags=re.IGNORECASE
+        )
         if not m:
             return {"raw": None, "value": None, "span": None, "parsed": []}
         raw = m.group(1).strip()
@@ -648,13 +660,15 @@ def extract_inventors(front_text: str, inid_blocks: Dict[str, Dict[str, Any]]) -
 
 # Fallback patterns (robust when INID blocks are disrupted)
 APPL_NO_FALLBACK_PAT = re.compile(
-    r"\bAppl\s*\.\s*No\s*\.\s*:\s*([0-9]{2}\s*/\s*[0-9\s*,\s*]{3,7}[0-9]{3})\b", re.IGNORECASE
+    r"\bAppl\s*\.\s*No\s*\.\s*:\s*([0-9]{2}\s*/\s*[0-9\s*,\s*]{3,7}[0-9]{3})\b",
+    re.IGNORECASE,
 )
 FILED_FALLBACK_PAT = re.compile(
     r"\bFiled\s*:\s*([A-Za-z\s*\.]+\s*+\d{1,2}\s*,\s*+\d{4})\b", re.IGNORECASE
 )
 DATE_OF_PATENT_FALLBACK_PAT = re.compile(
-    r"\bDate\s+of\s+Patent\s*:\s*([A-Za-z\s*\.]+\s*+\d{1,2}\s*,\s*+\d{4})\b", re.IGNORECASE
+    r"\bDate\s+of\s+Patent\s*:\s*([A-Za-z\s*\.]+\s*+\d{1,2}\s*,\s*+\d{4})\b",
+    re.IGNORECASE,
 )
 # Headings that frequently follow (21) and can contaminate the INID slice
 APPL_STOP_PAT = re.compile(
@@ -730,7 +744,9 @@ def extract_application_number(
     }
 
 
-def extract_filed_date(front_text: str, inid_blocks: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+def extract_filed_date(
+    front_text: str, inid_blocks: Dict[str, Dict[str, Any]]
+) -> Dict[str, Any]:
     raw = inid_blocks.get("22", {}).get("text")
     span = inid_blocks.get("22", {}).get("span")
     clean = strip_leading_label(raw or "", ["Filed"])
@@ -749,12 +765,16 @@ def extract_filed_date(front_text: str, inid_blocks: Dict[str, Dict[str, Any]]) 
     return {"raw": raw, "value": clean, "iso": iso, "span": span}
 
 
-def extract_grant_date(front_text: str, inid_blocks: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+def extract_grant_date(
+    front_text: str, inid_blocks: Dict[str, Dict[str, Any]]
+) -> Dict[str, Any]:
     raw = inid_blocks.get("45", {}).get("text")
     span = inid_blocks.get("45", {}).get("span")
 
     if raw:
-        clean = strip_leading_label(raw, ["Date of Patent", "Date of Patent:", "Date of Patent :"])
+        clean = strip_leading_label(
+            raw, ["Date of Patent", "Date of Patent:", "Date of Patent :"]
+        )
         clean = clean or None
         iso = parse_uspto_date_to_iso(clean) if clean else None
         if iso:
@@ -977,11 +997,14 @@ REFS_EVIDENCE_PAT = re.compile(
 # Evidence patterns that indicate the page contains citation rows even if headings are missing
 US_GRANT_EVIDENCE_PAT = re.compile(r"\b\d{1,2}\s*[,\.]\s*\d{3}\s*[,\.]\s*\d{3}\b")
 US_PUB_EVIDENCE_PAT = re.compile(
-    r"\b(?:19|20)\d{2}\s*[/\.\u2044\u2215\uFF0F]\s*[0-9O][0-9O,\s\.]{5,12}\s*A\d", re.IGNORECASE
+    r"\b(?:19|20)\d{2}\s*[/\.\u2044\u2215\uFF0F]\s*[0-9O][0-9O,\s\.]{5,12}\s*A\d",
+    re.IGNORECASE,
 )
 
 
-RELATED_APP_HEAD_PAT = re.compile(r"\bRelated\s+U\.S\.\s+Application\s+Data\b", re.IGNORECASE)
+RELATED_APP_HEAD_PAT = re.compile(
+    r"\bRelated\s+U\.S\.\s+Application\s+Data\b", re.IGNORECASE
+)
 PRIMARY_EXAMINER_PAT = re.compile(r"\bPrimary\s+Examiner\b", re.IGNORECASE)
 
 
@@ -1004,10 +1027,13 @@ US_GRANT_EVIDENCE_PAT = re.compile(
     r"\b\d{1,2}\s*[,\.]\s*\d{3}\s*[,\.]\s*\d{3}\b"
 )  # e.g., 5,864,394
 US_PUB_EVIDENCE_PAT = re.compile(
-    r"\b(?:19|20)\d{2}\s*[/\.\u2044\u2215\uFF0F]\s*[0-9O][0-9O,\s\.]{5,12}\s*A\d", re.IGNORECASE
+    r"\b(?:19|20)\d{2}\s*[/\.\u2044\u2215\uFF0F]\s*[0-9O][0-9O,\s\.]{5,12}\s*A\d",
+    re.IGNORECASE,
 )
 
-RELATED_APP_HEAD_PAT = re.compile(r"\bRelated\s+U\.S\.\s+Application\s+Data\b", re.IGNORECASE)
+RELATED_APP_HEAD_PAT = re.compile(
+    r"\bRelated\s+U\.S\.\s+Application\s+Data\b", re.IGNORECASE
+)
 
 # These are reasonable “end of related-app block” anchors on front-matter pages
 RELATED_APP_END_PAT = re.compile(
@@ -1121,7 +1147,9 @@ def _page0_refs_start(p0: str) -> int | None:
     return min(candidates) if candidates else None
 
 
-def extract_references_region(pages_text: List[str], *, max_pages: int = 3) -> Dict[str, Any]:
+def extract_references_region(
+    pages_text: List[str], *, max_pages: int = 3
+) -> Dict[str, Any]:
     if not pages_text:
         return {"raw": "", "pages_used": []}
 
@@ -1152,7 +1180,9 @@ def extract_references_region(pages_text: List[str], *, max_pages: int = 3) -> D
         pi2 = strip_related_application_data_block(pi)
 
         has_heading = bool(REFS_EVIDENCE_PAT.search(pi2))
-        has_numbers = bool(US_GRANT_EVIDENCE_PAT.search(pi2) or US_PUB_EVIDENCE_PAT.search(pi2))
+        has_numbers = bool(
+            US_GRANT_EVIDENCE_PAT.search(pi2) or US_PUB_EVIDENCE_PAT.search(pi2)
+        )
 
         if has_heading or has_numbers:
             chunks.append(pi2.strip())
@@ -1256,7 +1286,9 @@ def parse_front_page(front_text: str) -> Dict[str, Any]:
         qa_warnings.append("missing_patent_header_number")
 
     patent_digits = normalize_patent_number_digits(patent_header or "")
-    patent_normalized = normalize_us_patent_header(patent_header or "") if patent_header else None
+    patent_normalized = (
+        normalize_us_patent_header(patent_header or "") if patent_header else None
+    )
     kind_code = None
     if patent_header:
         mk = KIND_CODE_PAT.search(patent_header)
@@ -1322,7 +1354,9 @@ def parse_front_page(front_text: str) -> Dict[str, Any]:
     # References region only from page 0 (best effort)
     refs_region = extract_references_region([front_text], max_pages=1)
     refs_text = refs_region["raw"]
-    cited_grants = extract_cited_us_patents_from_refs(refs_text, patent_digits)  # your existing one
+    cited_grants = extract_cited_us_patents_from_refs(
+        refs_text, patent_digits
+    )  # your existing one
     cited_pubs = extract_us_publications_from_refs(
         refs_text, exclude_canonicals={p["canonical"] for p in prior_pubs}
     )
@@ -1341,7 +1375,9 @@ def parse_front_page(front_text: str) -> Dict[str, Any]:
 
     if counts_obj:
         qa_info["reported_claim_count"] = counts_obj.get("reported_claim_count")
-        qa_info["reported_drawing_sheet_count"] = counts_obj.get("reported_drawing_sheet_count")
+        qa_info["reported_drawing_sheet_count"] = counts_obj.get(
+            "reported_drawing_sheet_count"
+        )
 
     return {
         "raw_text": front_text,
@@ -1413,7 +1449,9 @@ def parse_front_matter(pages_text: List[str], *, max_pages: int = 3) -> Dict[str
     # add the implementation we discussed (US_PUB_APP_PAT + normalize_us_pub_app).
     prior = (base.get("prior_publication_data") or {}).get("us_publications") or []
     exclude = {p["canonical"] for p in prior if p.get("canonical")}
-    cited_pubs = extract_us_publications_from_refs(refs_text, exclude_canonicals=exclude)
+    cited_pubs = extract_us_publications_from_refs(
+        refs_text, exclude_canonicals=exclude
+    )
 
     # 4) Replace references section in base output
     base["references_cited"] = {
@@ -1438,7 +1476,9 @@ def parse_front_matter(pages_text: List[str], *, max_pages: int = 3) -> Dict[str
     warnings = [w for w in warnings if w != "no_cited_us_publications_found"]
 
     # Re-add warning only if (56) exists on page0 but still nothing extracted across pages
-    if REFS_START_PAT.search(page0) and (len(cited_grants) == 0 and len(cited_pubs) == 0):
+    if REFS_START_PAT.search(page0) and (
+        len(cited_grants) == 0 and len(cited_pubs) == 0
+    ):
         warnings.append("no_cited_us_patents_found")
 
     base["qa"] = {"warnings": warnings, "info": info}
