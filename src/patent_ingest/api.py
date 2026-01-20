@@ -211,6 +211,9 @@ def parse_patent(
         pdf_sha256: Optional[str] = None
         if pdf_bytes is not None:
             pdf_sha256 = _sha256(pdf_bytes)
+        else:
+            with open(pdf_path_use, "rb") as f:
+                pdf_sha256 = _sha256(f.read())
 
         return ParseResult(result, SCHEMA_VERSION, doc_id, pdf_sha256)
     finally:
@@ -261,28 +264,36 @@ def export_artifacts(
     else:
         pdf_path_use = str(pdf_path)
 
-    manifest: Dict[str, Any] = {"doc_id": doc_id, "artifacts": {}}
+    manifest: Dict[str, Any] = {
+        "doc_id": doc_id,
+        "schema_version": parse_result.schema_version,
+        "pdf_path": pdf_path,
+        "sha256": parse_result.pdf_sha256,
+        "artifacts": {},
+    }
 
     with tempfile.TemporaryDirectory() as td:
         tmp_out = Path(td)
 
         if spec.export_canonical_front_json:
             canonical = parse_result.ingested.data.front_matter.canonical()
-            key = f"{doc_id}/front_canonical.json"
-            manifest["artifacts"]["front_canonical_json"] = sink.put_json(
-                key, canonical
-            )
+            loc = "front/metadata.json"
+            manifest["artifacts"]["metadata"] = loc
+            sink.put_json(f"{doc_id}/{loc}", canonical)
 
         if spec.export_body_text:
-            canonical = parse_result.ingested.data.body.canonical_sections()
-            key = f"{doc_id}/body.json"
-            manifest["artifacts"]["body_canonical_json"] = sink.put_json(key, canonical)
-            canonical = parse_result.ingested.data.body.canonical_claims()
-            key = f"{doc_id}/claims.json"
-            manifest["artifacts"]["claims"] = sink.put_json(key, canonical)
-            canonical = parse_result.ingested.data.body.canonical_figures()
-            key = f"{doc_id}/figures.json"
-            manifest["artifacts"]["figures"] = sink.put_json(key, canonical)
+            sections = parse_result.ingested.data.body.canonical_sections()
+            loc = "body/sections.json"
+            manifest["artifacts"]["sections"] = loc
+            sink.put_json(f"{doc_id}/{loc}", sections)
+            claims = parse_result.ingested.data.body.canonical_claims()
+            loc = "body/claims.json"
+            manifest["artifacts"]["claims"] = loc
+            sink.put_json(f"{doc_id}/{loc}", claims)
+            figures = parse_result.ingested.data.body.canonical_figures()
+            loc = "body/figures.json"
+            manifest["artifacts"]["figures"] = loc
+            sink.put_json(f"{doc_id}/{loc}", figures)
 
         # 2) Drawing sheets / figure exports
         if spec.export_sheet_pdfs or spec.export_sheet_pngs or spec.export_figure_pngs:
@@ -295,29 +306,49 @@ def export_artifacts(
             export_dir = tmp_out / "drawings"
             export_dir.mkdir(parents=True, exist_ok=True)
 
-            export_drawing_artifacts(data, export_dir, diag)
+            from patent_ingest.drawing_sheets.export import ExportPolicy
+
+            export_drawing_artifacts(
+                data,
+                export_dir,
+                diag,
+                policy=ExportPolicy(
+                    export_region_pngs=spec.export_figure_pngs,
+                    export_sheet_pngs=spec.export_sheet_pngs,
+                    strict=False,
+                ),
+            )
 
             # Upload produced files
             for path in export_dir.rglob("*"):
-                print(f"Found exported file: {path}")
                 if not path.is_file():
                     continue
                 rel = path.relative_to(export_dir).as_posix()
-                key = f"{doc_id}/drawings/{rel}"
+                loc = f"drawings/{rel}"
                 ctype, _ = mimetypes.guess_type(str(path))
                 ctype = ctype or "application/octet-stream"
-                uri = sink.put_bytes(key, path.read_bytes(), content_type=ctype)
+                sink.put_bytes(f"{doc_id}/{loc}", path.read_bytes(), content_type=ctype)
                 # put into manifest buckets
                 if rel.endswith(".pdf") and rel.startswith("sheets/"):
-                    manifest["artifacts"].setdefault("sheet_pdfs", []).append(uri)
-                elif rel.endswith(".png") and rel.startswith("sheets_png/"):
-                    manifest["artifacts"].setdefault("sheet_pngs", []).append(uri)
+                    manifest["artifacts"].setdefault("sheet_pdfs", []).append(loc)
+                elif rel.endswith(".png") and rel.startswith("sheets/"):
+                    manifest["artifacts"].setdefault("sheet_pngs", []).append(loc)
                 elif rel.endswith(".png") and (
-                    "figures" in rel or "figures_png" in rel
+                    "regions" in rel or "regions_png" in rel
                 ):
-                    manifest["artifacts"].setdefault("figure_pngs", []).append(uri)
+                    manifest["artifacts"].setdefault("figure_pngs", []).append(loc)
                 else:
-                    manifest["artifacts"].setdefault("other", []).append(uri)
+                    manifest["artifacts"].setdefault("other", []).append(loc)
+            from datetime import datetime
+
+            manifest["created_utc"] = datetime.today().strftime("%Y-%m-%d")
+
+            from patent_ingest.diagnostics import DiagFormat
+
+            manifest["diagnostics"] = diag.diagnostics_as(DiagFormat.JSON)
+
+            key = f"{doc_id}/manifest.json"
+            sink.put_json(key, manifest)
 
     if tmp_pdf_path is not None:
         try:

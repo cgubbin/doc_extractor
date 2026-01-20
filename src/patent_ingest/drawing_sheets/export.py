@@ -47,7 +47,7 @@ class ExportPolicy:
 
     # What to export
     export_region_pngs: bool = True
-    export_sheet_pngs: bool = False
+    export_sheet_pngs: bool = True
 
     # Output subdirs (relative to out_dir)
     region_dirname: str = "regions"
@@ -239,6 +239,7 @@ def export_drawing_artifacts(
                 continue
 
             for idx, region in enumerate(sheet.regions):
+                print(f"  Exporting region {idx + 1} on page {p}")
                 try:
                     box = _bbox_norm_to_px(region.crop_bbox_norm, W, H)
                     box = _pad_px_box(box, W, H, policy.pad_px)

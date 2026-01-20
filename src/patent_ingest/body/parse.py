@@ -5,8 +5,10 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Dict, List, Tuple, Optional, Iterable, Any
 
+from patent_ingest.claims import Claim
 from patent_ingest.diagnostics import Diagnostics
 from patent_ingest.model.document import MultiPage
+from patent_ingest.common import patterns
 
 
 # -----------------------------------------------------------------------------
@@ -37,7 +39,7 @@ class PatentBodyPolicy:
 @dataclass(frozen=True)
 class ClaimsData:
     count: int
-    items: Tuple[str, ...]
+    items: Tuple[Claim, ...]
     method: str
 
 
@@ -66,8 +68,16 @@ class PatentBodyData:
             if k in {"background", "summary", "detailed_description"}
         }
 
-    def canonical_claims(self) -> Tuple[str, ...]:
-        return self.claims.items
+    def canonical_claims(self) -> list[str, ...]:
+        return [
+            {
+                "number": c.number,
+                "text": c.text,
+                "depends_on": c.depends_on,
+                "is_independent": c.is_independent,
+            }
+            for c in self.claims.items
+        ]
 
     def canonical_figures(self) -> Tuple[str, ...]:
         return self.figures.items
@@ -322,31 +332,88 @@ def _find_claims_start_offset(body_text: str) -> Optional[int]:
     return None
 
 
-def _parse_claims_from_block(block: str) -> List[str]:
-    if not block:
+# Works with merged two-column text, e.g., "... 13.The ... 16.The ..."
+# while excluding "claim 12." references.
+CLAIM_ANY_RE = re.compile(r"(?i)(?<!claim\s)(?<!claims\s)\b(\d{1,3})\.(?=\s*[A-Z])")
+
+DEPENDENCY_RE = re.compile(r"\bclaim(?:s)?\s+(\d+)(?:\s*[-–]\s*(\d+))?", re.IGNORECASE)
+
+
+def _parse_claims_from_block(claims_text: str) -> list[Claim]:
+    matches = list(CLAIM_ANY_RE.finditer(claims_text))
+    if not matches:
         return []
 
-    starts = list(_CLAIM_START_MARKER_RX.finditer(block))
-    if not starts:
-        return []
+    claims: list[Claim] = []
+    for i, m in enumerate(matches):
+        no = int(m.group(1))
+        start = m.start()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(claims_text)
+        body = claims_text[m.end() : end].strip()
+        body = _clean(body)
 
-    claims: List[str] = []
-    for i, m in enumerate(starts):
-        claim_num = m.group(1)
-        start_pos = m.start(1)  # start at the number
-        end_pos = starts[i + 1].start(1) if i + 1 < len(starts) else len(block)
-        chunk = block[start_pos:end_pos].strip()
+        deps = _extract_dependencies(body)
+        is_ind = len(deps) == 0
+        claims.append(
+            Claim(number=no, text=body, depends_on=deps, is_independent=is_ind)
+        )
 
-        # Deterministic whitespace normalization inside each claim
-        chunk = re.sub(r"\s+", " ", chunk).strip()
+    # Deduplicate if merged text causes accidental repeats
+    out = []
+    seen = set()
+    for c in claims:
+        if c.number in seen:
+            continue
+        seen.add(c.number)
+        out.append(c)
+    return out
 
-        # Ensure "<n>." prefix is present
-        if not re.match(rf"^{re.escape(claim_num)}\s*\.", chunk):
-            chunk = f"{claim_num}. {chunk}"
 
-        claims.append(chunk)
+def _clean(t: str) -> str:
+    t = re.sub(r"\n{3,}", "\n\n", t)
+    return t.strip()
 
-    return claims
+
+def _extract_dependencies(claim_body: str) -> list[int]:
+    deps: set[int] = set()
+    for m in DEPENDENCY_RE.finditer(claim_body):
+        a = int(m.group(1))
+        b = int(m.group(2)) if m.group(2) else None
+        if b is None:
+            deps.add(a)
+        else:
+            lo, hi = min(a, b), max(a, b)
+            for x in range(lo, hi + 1):
+                deps.add(x)
+    return sorted(deps)
+
+
+# def _parse_claims_from_block(block: str) -> List[str]:
+#     if not block:
+#         return []
+#
+#     starts = list(_CLAIM_START_MARKER_RX.finditer(block))
+#     if not starts:
+#         return []
+#
+#     claims: List[str] = []
+#     for i, m in enumerate(starts):
+#         claim_num = m.group(1)
+#         start_pos = m.start(1)  # start at the number
+#         end_pos = starts[i + 1].start(1) if i + 1 < len(starts) else len(block)
+#         chunk = block[start_pos:end_pos].strip()
+#
+#         # Deterministic whitespace normalization inside each claim
+#         chunk = re.sub(r"\s+", " ", chunk).strip()
+#
+#         # Ensure "<n>." prefix is present
+#         if not re.match(rf"^{re.escape(claim_num)}\s*\.", chunk):
+#             chunk = f"{claim_num}. {chunk}"
+#
+#         claims.append(chunk)
+#
+#     return claims
+#
 
 
 def _find_claims_region_tail(text: str) -> Optional[Tuple[int, int, dict]]:
@@ -477,32 +544,13 @@ def _extract_claims_block(
 # Capture a FIG/FIGS reference followed by a "figlist" chunk that may include:
 # - single ids: 1, 2A
 # - ranges: 1A-1C, 3-5
+# Use common patterns for figure references
+# - ranges: 1A-1C
 # - lists: 2, 3 and 4
 # - mixed: 1A-1C, 2 and 3
-_FIG_REF_RE = re.compile(
-    r"\bFIGS?\.?\s+"
-    r"(?P<figlist>"
-    r"(?:\d+[A-Z]?)"
-    r"(?:\s*[-–]\s*\d+[A-Z]?)?"
-    r"(?:\s*(?:,|and)\s*\d+[A-Z]?)*"
-    r")",
-    re.IGNORECASE,
-)
 
-_FIG_ID_RX = re.compile(r"^\s*(\d+)\s*([A-Z])?\s*$", re.IGNORECASE)
-
-
-def _parse_fig_id(fig: str) -> tuple[int, Optional[str]]:
-    """
-    '3'  -> (3, None)
-    '3A' -> (3, 'A')
-    """
-    m = _FIG_ID_RX.match(fig.strip())
-    if not m:
-        raise ValueError(f"Invalid figure id: {fig!r}")
-    n = int(m.group(1))
-    s = m.group(2)
-    return n, (s.upper() if s else None)
+# Alias for backwards compatibility
+_parse_fig_id = patterns.parse_fig_id
 
 
 def _expand_fig_range(start: str, end: str) -> List[str]:
@@ -638,7 +686,7 @@ def _extract_figure_ids(text: str) -> List[str]:
         return []
 
     ids: List[str] = []
-    for m in _FIG_REF_RE.finditer(text):
+    for m in patterns.FIG_REF_RE.finditer(text):
         figlist = m.group("figlist")
         try:
             # Reuse the same figlist parsing used for drawing descriptions.
@@ -724,7 +772,9 @@ def parse_patent_body(
     Catastrophic failures (e.g., PDF cannot be opened) may still raise.
     """
 
-    body_text = _normalize_text(doc.linearize())
+    from patent_ingest.common import normalize_punctuation_spacing
+
+    body_text = _normalize_text(normalize_punctuation_spacing(doc.linearize()))
 
     # --- section splitting (position-based) ---
     sections, spans, headings_found = _split_sections_by_heading_positions(body_text)
@@ -820,8 +870,27 @@ def parse_patent_body(
             meta={"expected": expected_claim_count, "actual": claims_count},
         )
 
+    print(f"Extracted {claims_count} claims using method '{claims_method}'.")
+
+    # --- figures referenced ---
+    # IMPORTANT: we only want anchors from the "Brief Description of the Drawings" section.
+    # Using full body text will pick up FIG references throughout Detailed Description.
+    if drawings_items:
+        # Prefer the structured table: stable and inherently constrained to the drawings prose.
+        figure_ids = sorted(
+            {
+                f"{row['figure_number']}{row.get('figure_suffix') or ''}".upper()
+                for row in drawings_items
+                if row.get("figure_number")
+            }
+        )
+        fig_source = f"drawings_items:{drawings_method}"
+    else:
+        # If we failed to build drawings items, fall back to scanning ONLY the drawings section text.
+        figure_ids = _extract_figure_ids(drawings_text)
+        fig_source = "drawings_section_text"
     # --- figures referenced in body (FIG. 1, etc.) ---
-    figure_ids = _extract_figure_ids(body_text)
+    # figure_ids = _extract_figure_ids(body_text)
     fig_count = len(figure_ids)
 
     if expected_drawing_count is not None:

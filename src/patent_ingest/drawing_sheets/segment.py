@@ -5,22 +5,22 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 import re
 
+from patent_ingest.common import patterns
+
 
 # ============================================================
-# Regex patterns
+# Regex patterns (use common patterns where available)
 # ============================================================
 
-_SHEET_OF_RE = re.compile(r"\bSheet\s+([0-9A-Za-z]+)\s+of\s+([0-9]+)\b", re.IGNORECASE)
+# Sheet marker pattern (specific to drawing sheets)
+_SHEET_OF_RE = patterns.SHEET_OF_RE
 
-_FIG_TOKEN_RE = re.compile(
-    r"^(?:Fig\.?|FIG\.?)$", re.IGNORECASE
-)  # Fig, Fig., FIG, FIG.
-_FIG_WORD_RE = re.compile(r"^Fig$", re.IGNORECASE)  # Fig
-_FIG_COMBINED_RE = re.compile(
-    r"^(?:Fig\.?|FIG\.?)([0-9]+[A-Za-z]?)$", re.IGNORECASE
-)  # Fig.3A
-_FIG_NUM_RE = re.compile(r"^([0-9]+[A-Za-z]?)$")  # 3, 3A
-_FIG_ID_RE = re.compile(r"^(\d+)([A-Za-z])?$")  # 3A -> (3,"A")
+# Figure label patterns (from common)
+_FIG_TOKEN_RE = patterns.FIG_TOKEN_RE
+_FIG_WORD_RE = patterns.FIG_WORD_RE
+_FIG_COMBINED_RE = patterns.FIG_COMBINED_RE
+_FIG_NUM_RE = patterns.FIG_NUM_RE
+_FIG_ID_RE = patterns.FIG_ID_RE
 
 
 # ============================================================

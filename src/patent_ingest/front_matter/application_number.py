@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Optional, Tuple
+from typing import Optional, Tuple
 
 from patent_ingest.diagnostics import Diagnostics
 from patent_ingest.model.document import MultiPage
-from patent_ingest.model.span import Span, Column, Position, Where
+from patent_ingest.model.span import Span, Column, Position
 from patent_ingest.parsed import ParsedRaw, ParsedNorm, INIDKind, EntityKind
 from patent_ingest.common import (
     strip_leading_label_with_idx,
@@ -236,6 +236,7 @@ def extract_application_number(
         )
 
     fb = find_first_application_no_fallback(doc)
+    print("Fallback appl no search result:", fb)
     if fb:
         cleaned_fb = _clean_application_slice(fb)
         if cleaned_fb.text and validate_us_application_no_text(cleaned_fb.text):

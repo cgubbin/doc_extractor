@@ -13,7 +13,6 @@ def main(argv: list[str] | None = None) -> int:
     import argparse
     import sys
     from pathlib import Path
-    import json
 
     from patent_ingest.pipeline import IngestStatus
     from patent_ingest.api import (
@@ -195,45 +194,4 @@ def main(argv: list[str] | None = None) -> int:
             doc_id=args.doc_id,
         )
 
-        # Write a manifest.json for convenience
-        manifest_path = Path(args.export_dir) / "manifest.json"
-        manifest_path.parent.mkdir(parents=True, exist_ok=True)
-        manifest_path.write_text(
-            json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
-
-    # ------------------------
-    # Human summary (stderr)
-    # ------------------------
-    # qa = result.get("qa") or {}
-    # warnings = list(qa.get("warnings") or [])
-    #
-    # print("=== Patent ingest complete ===", file=sys.stderr)
-    # print(f"PDF: {args.pdf}", file=sys.stderr)
-    # if args.doc_id:
-    #     print(f"Doc ID: {args.doc_id}", file=sys.stderr)
-    #
-    # # Try to print boundary info if available
-    # qa_info = qa.get("info") or {}
-    # if "drawings_start_index" in qa_info:
-    #     print(
-    #         f"Drawings start index: {qa_info.get('drawings_start_index')}",
-    #         file=sys.stderr,
-    #     )
-    # if "body_start_index" in qa_info:
-    #     print(f"Body start index: {qa_info.get('body_start_index')}", file=sys.stderr)
-    #
-    # if warnings:
-    #     print("\nWarnings:", file=sys.stderr)
-    #     for w in warnings:
-    #         print(f"  - {w}", file=sys.stderr)
-    #
-    # if manifest is not None:
-    #     print(f"\nArtifacts exported to: {args.export_dir}", file=sys.stderr)
-    #     print("Manifest: manifest.json", file=sys.stderr)
-    #
-    # if args.strict and warnings:
-    #     return 1
-    #
     return 0

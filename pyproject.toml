@@ -7,6 +7,7 @@ dependencies = [
     "pymupdf-layout>=1.26.6",
     "pymupdf4llm>=0.2.9",
     "pypdf",
+    "structlog>=24.1.0",
 ]
 
 [build-system]
