@@ -41,6 +41,10 @@ class Span:
         return self.start.page
 
     @property
+    def pages(self) -> List[int]:
+        return [self.start.page]
+
+    @property
     def column(self) -> Column:
         return self.start.column
 
@@ -61,6 +65,11 @@ class MultiSpan:
     def __repr__(self) -> str:
         inner = ", ".join(repr(p) for p in self.parts)
         return f"MultiSpan({inner})"
+
+    @property
+    def pages(self) -> List[int]:
+        all = [p.page for p in self.parts]
+        return list(sorted(set(all)))  # unique, sorted
 
 
 Where = Union[Span, MultiSpan]

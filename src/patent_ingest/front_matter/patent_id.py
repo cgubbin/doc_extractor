@@ -1,10 +1,12 @@
 import re
-from typing import Any, Optional
+from typing import Optional, Any
 
 
 from patent_ingest.model.document import MultiPage
 from patent_ingest.model.span import Column, Span, Position
-from patent_ingest.parsed import ParsedRaw, ParsedNorm, INIDKind, EntityKind
+from patent_ingest.parsed import ParsedRaw, EntityKind, ParsedNorm, INIDKind
+from patent_ingest.diagnostics import Diagnostics
+
 
 # Finder/validator: must be raw-string. This one compiles.
 US_PATENT_FINDER = re.compile(
@@ -82,31 +84,37 @@ def _find_first_patent_id_page0_right(doc: MultiPage) -> Optional[ParsedRaw[str]
 def extract_patent_id(
     doc: MultiPage,
     inid_blocks: dict[INIDKind, ParsedRaw[str]],
+    diag: Diagnostics,
     *,
     sep: str = "\n",
     order: tuple[Column, Column] = (Column.LEFT, Column.RIGHT),
 ) -> Optional[ParsedNorm[str]]:
     """
-    Patent ID extraction, consistent with your new functions:
+    Restores the behavior of your previous patent_id extractor while adding Diagnostics:
+
       1) Prefer INID (when available) *only if format-valid*
       2) Else fallback: first suitable substring in page0/right
+         - If fallback match fails validation, still return best-effort (validated=False),
+           and emit a WARNING (NOT an error), matching your prior behavior.
+
+    Diagnostics:
+      - WARN on INID candidates that are present but invalid
+      - ERROR only when *no* candidate is found at all (INID skipped and fallback not found)
+      - WARN when fallback exists but fails validation (still returns value)
 
     Returns ParsedNorm[str] where:
       - value: compacted id if possible, else cleaned
       - meta["human"]: cleaned human token
       - meta["compact"]: compact token (if derived)
       - meta["validated"]: True/False
-      - meta["rejections"]: reasons INID was skipped
+      - meta["rejections"]: list[dict] (kept for backward compatibility)
     """
+    field = "patent_id"
     rejections: list[dict[str, Any]] = []
 
-    # 1) INID candidate(s) — add the ones you actually have in your INIDKind enum
+    # 1) INID candidate(s) — only those present in your enum
     prefer: list[INIDKind] = []
-    for name in (
-        "_11",
-        "_10",
-        "_13",
-    ):  # common doc-number-ish fields; adjust to your enum set
+    for name in ("_11", "_10", "_13"):
         if hasattr(INIDKind, name):
             prefer.append(getattr(INIDKind, name))
 
@@ -144,27 +152,57 @@ def extract_patent_id(
                 validated=True,
             )
 
-        rejections.append(
-            {
-                "source": "inid",
-                "inid_code": k.value,
-                "reason": "no plausible patent id found in INID text",
-                "sample": raw.excerpt(120),
-            }
+        # Record rejection (backward-compatible meta) + diagnostics warning
+        rej = {
+            "source": "inid",
+            "inid_code": k.value,
+            "reason": "no plausible patent id found in INID text",
+            "sample": raw.excerpt(120)
+            if hasattr(raw, "excerpt")
+            else (raw.text or "")[:120],
+        }
+        rejections.append(rej)
+        diag.warn(
+            "patent_id.inid_invalid",
+            "INID candidate present but not a valid patent id; skipping.",
+            field=field,
+            where=raw.where,
+            raw=(raw.text or "")[:160],
+            inid=k.value,
         )
 
     # 2) Fallback: page0/right first match
-    fb = _find_first_patent_id_page0_right(doc)
+    fb = (
+        _find_first_patent_id_page0_right(doc, sep=sep, order=order)
+        if _find_first_patent_id_page0_right.__code__.co_argcount >= 3
+        else _find_first_patent_id_page0_right(doc)
+    )
+
     if not fb or not (fb.text or "").strip():
+        # No fallback; only now is it a hard error
+        diag.error(
+            "patent_id.missing",
+            "No patent id found (no valid INID candidate and no fallback match in page0/right).",
+            field=field,
+            meta={"rejections": rejections},
+        )
         return None
 
     clean = _clean_patent_id_text(fb.text)
     compact = _patent_id_compact(clean)
     value = compact or clean
 
-    # Validate fallback too; if invalid, still return best-effort (like your date fallback #3),
-    # but mark validated=False so downstream can decide.
     validated = _patent_id_valid(clean)
+    if not validated:
+        # Preserve prior behavior: return best-effort, but mark validated=False.
+        diag.warn(
+            "patent_id.fallback_failed_validation",
+            "Fallback matched a patent-like token but failed validation; returning best-effort with validated=False.",
+            field=field,
+            where=fb.where,
+            raw=(fb.text or "")[:160],
+            meta={"clean": clean, "rejections": rejections},
+        )
 
     return fb.normalize_to(
         value=value,

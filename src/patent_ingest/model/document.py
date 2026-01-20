@@ -30,6 +30,9 @@ class TwoColumn:
         self.left = page.get_textbox(left_col_mediabox)
         self.right = page.get_textbox(right_col_mediabox)
 
+    def linearize(self) -> str:
+        return self.left + "\n" + self.right
+
 
 class MultiPage:
     pages: list[TwoColumn]
@@ -65,3 +68,30 @@ class MultiPage:
         if isinstance(where, Span):
             return self.slice_span(where)
         return joiner.join(self.slice_span(s) for s in where.parts)
+
+    def subset(self, pages: range) -> "MultiPage":
+        mp = MultiPage.__new__(MultiPage)
+        mp.pages = [self.pages[i] for i in pages]
+        return mp
+
+    def linearize(self) -> str:
+        return "\n".join(p.linearize() for p in self.pages)
+
+
+def read_pdf_to_multipage(
+    filepath: str,
+    *,
+    page_range: range | None = None,
+    header_margin: float = 25,
+    footer_margin: float = 25,
+) -> MultiPage:
+    with pymupdf.open(filepath) as doc:
+        if page_range is None:
+            page_range = range(len(doc))
+        mp = MultiPage(
+            doc,
+            page_range,
+            header_margin=header_margin,
+            footer_margin=footer_margin,
+        )
+    return mp

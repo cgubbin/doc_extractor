@@ -4,6 +4,7 @@ from typing import Any, Sequence, Optional
 from patent_ingest.model.span import Span, Where, Position
 from patent_ingest.parsed import ParsedRaw, INIDKind, EntityKind, ParsedNorm
 from patent_ingest.front_matter.util import normalize_punctuation_spacing
+from patent_ingest.diagnostics import Diagnostics
 
 ASSIGNEE_HEADING_STOP_PAT = re.compile(
     r"\b("
@@ -170,17 +171,25 @@ def _clean_assignee_from_inid(raw: ParsedRaw[str]) -> ParsedRaw[str]:
 
 def extract_assignee(
     inid_blocks: dict[INIDKind, ParsedRaw[str]],
+    diag: Diagnostics,
 ) -> Optional[ParsedNorm[str]]:
     """
-    New-model equivalent of extract_assignee_clean().
+    Same behavior as your original new-model extract_assignee(), but with Diagnostics added.
 
     Preference:
       - INID(73) assignee
       - else INID(71) applicant
+      - else None
 
-    Returns ParsedNorm[str] with kind=EntityKind.ORGANIZATION (assignee),
-    value=cleaned string, where=provenance span(s).
+    Behavior is unchanged:
+      - If INID exists but cleans to empty, we still return ParsedNorm[value=""] with normalized=False.
+
+    Diagnostics:
+      - WARN if neither INID is present (missing)
+      - WARN if chosen INID cleans to empty (cleaned-empty)
     """
+    field = "assignee"
+
     # 1) choose source block
     src: Optional[ParsedRaw[str]] = None
     used_inid: Optional[str] = None
@@ -195,6 +204,11 @@ def extract_assignee(
         src = inid71
         used_inid = "71"
     else:
+        diag.warn(
+            "assignee.missing",
+            "No assignee/applicant found in INID(73) or INID(71).",
+            field=field,
+        )
         return None
 
     # 2) retag + clean
@@ -207,6 +221,14 @@ def extract_assignee(
     cleaned = _clean_assignee_from_inid(tagged)
 
     if not cleaned.text.strip():
+        diag.warn(
+            "assignee.cleaned_empty",
+            "Assignee/applicant INID present but cleaned to empty (likely boilerplate/stop patterns).",
+            field=field,
+            where=cleaned.where,
+            raw=(src.text or "")[:200],
+            inid_code=used_inid,
+        )
         return cleaned.normalize_to(
             value="",
             kind=EntityKind.ORGANIZATION,

@@ -7,6 +7,7 @@ from patent_ingest.model.mapping import (
     global_range_to_where,
 )
 from patent_ingest.front_matter.counts import REPORTED_COUNTS_PAT
+from patent_ingest.diagnostics import Diagnostics
 from patent_ingest.front_matter.util import (
     normalize_whitespace,
     normalize_punctuation_spacing,
@@ -23,33 +24,59 @@ ABSTRACT_HEAD_PAT = re.compile(
 
 def extract_abstract(
     doc: MultiPage,
+    diag: Diagnostics,
     *,
     sep: str = "\n",
     order: tuple[Column, Column] = (Column.LEFT, Column.RIGHT),
 ) -> Optional[ParsedNorm[str]]:
     """
-    New-model equivalent of extract_abstract(front_text).
+    Same behavior as your original extract_abstract(), but with Diagnostics added.
 
     - Finds abstract heading "(57) ABSTRACT" or "ABSTRACT" at start of a line.
     - Abstract starts at end of the heading match (heading excluded).
     - Abstract ends at reported-counts line if present after the heading, else end of linearized text.
     - Returns ParsedNorm[str] where value is the abstract text and where is its provenance span(s).
+
+    Diagnostics:
+      - WARN when heading is missing
+      - WARN when heading exists but extracted body is empty after trimming
     """
+    field = "abstract"
+
     linear_text, segments = linearize(doc, sep=sep, order=order)
 
     hm = ABSTRACT_HEAD_PAT.search(linear_text or "")
     if not hm:
+        diag.warn(
+            "abstract.missing_heading",
+            "No ABSTRACT heading found.",
+            field=field,
+        )
         return None
 
     abs_start = hm.end()
     abs_end = len(linear_text)
 
-    cm = REPORTED_COUNTS_PAT.search(linear_text or "")  # assumes exists in module
+    cm = REPORTED_COUNTS_PAT.search(linear_text or "")
     if cm and cm.start() > hm.start():
         abs_end = cm.start()
 
     # Trim abstract body span to match value
     t_start, t_end = trim_global_range(linear_text, abs_start, abs_end)
+
+    if t_end <= t_start:
+        diag.warn(
+            "abstract.empty",
+            "ABSTRACT heading found but extracted abstract body is empty after trimming.",
+            field=field,
+            where=global_range_to_where(hm.start(), hm.end(), segments),
+            raw=linear_text[hm.start() : hm.end()],
+            meta={
+                "heading_global": (hm.start(), hm.end()),
+                "body_global": (t_start, t_end),
+            },
+        )
+        return None
 
     value = linear_text[t_start:t_end].strip()
 
@@ -57,7 +84,6 @@ def extract_abstract(
     heading_where = global_range_to_where(hm.start(), hm.end(), segments)
     body_where = global_range_to_where(t_start, t_end, segments)
 
-    # Represent as a ParsedNorm[str] (no special normalization beyond trimming)
     raw = ParsedRaw[str](
         kind=EntityKind.ABSTRACT,
         where=body_where,

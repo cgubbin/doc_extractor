@@ -1,5 +1,5 @@
 import re
-from typing import Any, Optional
+from typing import Optional
 
 from patent_ingest.model.document import MultiPage
 from patent_ingest.model.span import Column
@@ -8,6 +8,7 @@ from patent_ingest.front_matter.util import (
     _linear_find_group1_as_raw,
     normalize_punctuation_spacing,
 )
+from patent_ingest.diagnostics import Diagnostics
 
 # Capture "(54) ... (next INID marker)" as group(1)
 TITLE_INID_FALLBACK_PAT = re.compile(
@@ -71,57 +72,41 @@ def _title_valid(s: str) -> bool:
 def extract_title(
     doc: MultiPage,
     inid_blocks: dict[INIDKind, ParsedRaw[str]],
+    diag: Diagnostics,
     *,
     sep: str = "\n",
     order: tuple[Column, Column] = (Column.LEFT, Column.RIGHT),
 ) -> Optional[ParsedNorm[str]]:
-    """
-    Title extraction, consistent with the date extractors:
-      1) INID(54) if present and usable
-      2) fallback: regex capture of "(54) ... next INID" in linearized text
-      3) fallback: "Title:" label line
+    field = "title"
 
-    Returns ParsedNorm[str] with:
-      - value: cleaned title
-      - meta: {source, rule, normalized=True (always), rejections=[...]}
-    """
-    rejections: list[dict[str, Any]] = []
-
-    # 1) INID(54)
-    inid54 = inid_blocks.get(INIDKind._54) if hasattr(INIDKind, "_54") else None
+    inid54 = inid_blocks.get(INIDKind._54)
     if inid54 and (inid54.text or "").strip():
         clean = _clean_title_text(inid54.text)
         if _title_valid(clean):
-            as_title = inid54.retag(
-                EntityKind.TITLE,
-                rule="title:from-inid54",
-                source="inid",
-                inid_code="54",
-            )
-            cleaned = ParsedRaw[str](
-                kind=as_title.kind,
-                where=as_title.where,
+            raw = ParsedRaw[str](
+                kind=EntityKind.TITLE,
+                where=inid54.where,
                 text=clean,
-                confidence=as_title.confidence,
-                meta={**as_title.meta, "rejections": rejections},
+                confidence=inid54.confidence,
+                meta={**inid54.meta, "source": "inid", "inid_code": "54"},
             )
-            return cleaned.normalize_to(
+            return raw.normalize_to(
                 value=clean,
                 kind=EntityKind.TITLE,
                 system="PDF",
                 rule="title:inid54",
                 normalized=True,
             )
-        rejections.append(
-            {
-                "source": "inid",
-                "inid_code": "54",
-                "reason": "title invalid/empty after cleaning",
-                "sample": inid54.excerpt(120),
-            }
+
+        diag.warn(
+            "title.inid_invalid",
+            "INID(54) present but invalid after cleaning; attempting fallback.",
+            field=field,
+            where=inid54.where,
+            raw=(inid54.text or "")[:160],
+            inid="54",
         )
 
-    # 2) fallback: "(54) ... next INID"
     fb1 = _linear_find_group1_as_raw(
         doc,
         TITLE_INID_FALLBACK_PAT,
@@ -129,34 +114,27 @@ def extract_title(
         sep=sep,
         order=order,
         confidence=0.35,
-        meta={"rule": "title:fallback (54) block", "rejections": rejections},
+        meta={"rule": "title:fallback (54) block"},
     )
     if fb1 and (fb1.text or "").strip():
         clean = _clean_title_text(fb1.text)
         if _title_valid(clean):
-            cleaned = ParsedRaw[str](
-                kind=fb1.kind,
-                where=fb1.where,
-                text=clean,
-                confidence=fb1.confidence,
-                meta={**fb1.meta, "rejections": rejections},
-            )
-            return cleaned.normalize_to(
+            return fb1.normalize_to(
                 value=clean,
                 kind=EntityKind.TITLE,
                 system="PDF",
                 rule="title:fallback-inid-marker",
                 normalized=True,
             )
-        rejections.append(
-            {
-                "source": "fallback",
-                "reason": "fallback (54) capture invalid after cleaning",
-                "sample": fb1.excerpt(120),
-            }
+
+        diag.warn(
+            "title.fallback_inid_invalid",
+            "Fallback (54) block found but invalid after cleaning; attempting label fallback.",
+            field=field,
+            where=fb1.where,
+            raw=(fb1.text or "")[:160],
         )
 
-    # 3) fallback: "Title:" label line (rare, but cheap)
     fb2 = _linear_find_group1_as_raw(
         doc,
         TITLE_LABEL_FALLBACK_PAT,
@@ -164,7 +142,7 @@ def extract_title(
         sep=sep,
         order=order,
         confidence=0.2,
-        meta={"rule": "title:fallback Title: label", "rejections": rejections},
+        meta={"rule": "title:fallback Title:"},
     )
     if fb2 and (fb2.text or "").strip():
         clean = _clean_title_text(fb2.text)
@@ -175,7 +153,20 @@ def extract_title(
                 system="PDF",
                 rule="title:fallback-label",
                 normalized=True,
-                rejections=rejections,
             )
 
+        diag.error(
+            "title.fallback_label_invalid",
+            "Title label found but value invalid after cleaning.",
+            field=field,
+            where=fb2.where,
+            raw=(fb2.text or "")[:160],
+        )
+        return None
+
+    diag.error(
+        "title.missing",
+        "No title found in INID(54) or fallbacks.",
+        field=field,
+    )
     return None

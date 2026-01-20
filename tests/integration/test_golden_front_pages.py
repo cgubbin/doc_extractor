@@ -6,7 +6,8 @@ import pymupdf
 import re
 from difflib import SequenceMatcher
 
-from patent_ingest.pipeline import _build_front_matter_pages_text
+from patent_ingest.model.document import read_pdf_to_multipage
+from patent_ingest.front_matter.model import parse_front_matter
 
 ROOT = os.path.dirname(os.path.dirname(__file__))
 SAMPLES_DIR = os.path.join(ROOT, "..", "corpus", "samples")
@@ -78,13 +79,10 @@ def test_golden_front_pages_exact_match():
 
         doc = pymupdf.open(pdf_path)
 
-        N = expected.get("front_matter_pages_to_scan", 3)
-        N = min(N, doc.page_count)
-        expected.pop("front_matter_pages_to_scan", None)
-        text = _build_front_matter_pages_text(doc, pages_to_scan=N)
-        parsed = text.parse()
+        doc = read_pdf_to_multipage(pdf_path, page_range=range(0, doc.page_count))
+        result = parse_front_matter(doc)
 
-        got = parsed.canonical()
+        got = result.data.canonical()
 
         title_expected = expected.pop("title", None)
         title_got = got.pop("title", None)

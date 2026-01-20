@@ -1,7 +1,7 @@
 import os
-import pymupdf
 
-from patent_ingest.pipeline import _build_front_matter_pages_text
+from patent_ingest.model.document import read_pdf_to_multipage
+from patent_ingest.front_matter.model import parse_front_matter
 
 
 ROOT = os.path.dirname(os.path.dirname(__file__))
@@ -9,12 +9,9 @@ SAMPLE = os.path.join(ROOT, "..", "corpus", "samples", "US7629993B2.pdf")
 
 
 def test_single_front_page_extracts_core_fields():
-    doc = pymupdf.open(SAMPLE)
-    text = _build_front_matter_pages_text(doc, pages_to_scan=1)
+    text = read_pdf_to_multipage(SAMPLE, page_range=range(0, 5))
 
-    parsed = text.parse()
-
-    # print(parsed)
+    parsed = parse_front_matter(text).data
 
     assert parsed.patent_id is not None
     assert parsed.title is not None
@@ -26,6 +23,3 @@ def test_single_front_page_extracts_core_fields():
     assert parsed.abstract is not None
     assert parsed.reported_counts is not None
     assert parsed.citations is not None
-
-    # No critical failures
-    assert "missing_title" not in parsed.qa_warnings

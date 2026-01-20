@@ -15,12 +15,12 @@ from patent_ingest.parsed import (
     INIDKind,
     ParsedNorm,
     kind_display,
-    Kind,
 )
 from patent_ingest.front_matter.util import (
     normalize_whitespace_basic,
     normalize_punctuation_spacing,
 )
+from patent_ingest.diagnostics import Diagnostics
 
 
 @dataclass(frozen=True)
@@ -240,12 +240,13 @@ def _fallback_inventors_label_block(
 def extract_inventors(
     doc: MultiPage,
     inid_blocks: dict[INIDKind, ParsedRaw[str]],
+    diag: Diagnostics,
     *,
     sep: str = "\n",
     order: tuple[Column, Column] = (Column.LEFT, Column.RIGHT),
 ) -> list[ParsedNorm[Inventor]]:
     """
-    New-model inventors extractor. One-to-many.
+    Same behavior as your original extract_inventors(), but with Diagnostics added.
 
     Source precedence:
       1) INID(72)
@@ -253,11 +254,18 @@ def extract_inventors(
       3) fallback label search "Inventors: ..."
 
     Returns list[ParsedNorm[Inventor]] (possibly empty).
+
+    Diagnostics:
+      - WARN when no source found (INID72/75 missing and fallback missing)
+      - WARN when source exists but cleans to empty
+      - WARN when parsing yields no inventor chunks
+      - INFO when per-inventor span refinement fails (cannot locate chunk)
     """
+    field = "inventors"
+
     # 1) choose source
     src: Optional[ParsedRaw[str]] = None
     src_code: Optional[str] = None
-    src_kind: Optional[Kind] = None
 
     inid72 = inid_blocks.get(INIDKind._72) if hasattr(INIDKind, "_72") else None
     inid75 = inid_blocks.get(INIDKind._75) if hasattr(INIDKind, "_75") else None
@@ -265,45 +273,66 @@ def extract_inventors(
     if inid72 and (inid72.text or "").strip():
         src = inid72
         src_code = "72"
-        src_kind = INIDKind._72
     elif inid75 and (inid75.text or "").strip():
         src = inid75
         src_code = "75"
-        src_kind = INIDKind._75
     else:
         src = _fallback_inventors_label_block(doc, sep=sep, order=order)
         src_code = None
-        src_kind = EntityKind.INVENTOR  # placeholder
 
     if not src or not (src.text or "").strip():
+        diag.warn(
+            "inventors.missing",
+            "No inventors found in INID(72)/(75) and no label fallback match.",
+            field=field,
+        )
         return []
 
     # 2) clean the overall block
     cleaned_block_text = _clean_inventors_text(src.text)
     if not cleaned_block_text:
+        diag.warn(
+            "inventors.cleaned_empty",
+            "Inventor source found but cleaned to empty (likely spillover into other INIDs/headings).",
+            field=field,
+            where=src.where,
+            raw=(src.text or "")[:240],
+            inid_code=src_code,
+        )
         return []
 
-    # Prepare a “block raw” we can use for refinement
-    block_raw = ParsedRaw[str](
-        kind=EntityKind.INVENTOR,  # block-level kind; individuals become PERSON
+    # Prepare a “block raw” used for per-chunk where refinement
+    block_raw = ParsedRaw[
+        str
+    ](
+        kind=EntityKind.INVENTOR,  # block-level kind; individuals become INVENTOR entities
         where=src.where,
         text=cleaned_block_text,
         confidence=src.confidence,
         meta={
             **src.meta,
             "source_inid_code": src_code,
-            "source_kind": kind_display(src.kind),
+            "source_kind": kind_display(src.kind) if hasattr(src, "kind") else None,
         },
     )
 
     # 3) split into inventor chunks + parse
     chunk_pairs = parse_inventor_chunks(cleaned_block_text)
     if not chunk_pairs:
+        diag.warn(
+            "inventors.no_chunks",
+            "Cleaned inventor block produced no inventor chunks after splitting/parsing.",
+            field=field,
+            where=src.where,
+            raw=cleaned_block_text[:240],
+            inid_code=src_code,
+        )
         return []
 
-    # 4) Produce per-inventor ParsedNorm[Inventor], with per-chunk where where possible
+    # 4) Produce per-inventor ParsedNorm[Inventor], with per-chunk where when possible
     out: list[ParsedNorm[Inventor]] = []
     search_pos = 0
+
     for raw_chunk, inventor_val in chunk_pairs:
         # Attempt to refine per-inventor spans by locating the chunk in the cleaned block text
         subslice = _find_chunk_span_in_text(cleaned_block_text, raw_chunk, search_pos)
@@ -313,10 +342,17 @@ def extract_inventors(
         else:
             where2, refine_meta = (
                 block_raw.where,
-                {"refine": None, "note": "could not locate chunk in block"},
+                {"refine": None, "note": "could not locate chunk in cleaned block"},
+            )
+            diag.info_msg(
+                "inventors.span_refine_failed",
+                "Could not locate inventor chunk inside cleaned block; using block-level span.",
+                field=field,
+                where=block_raw.where,
+                raw=(raw_chunk or "")[:160],
+                inid_code=src_code,
             )
 
-        # Each inventor as its own parsed+normalized entity
         inventor_raw = ParsedRaw[str](
             kind=EntityKind.INVENTOR,
             where=where2,
@@ -335,7 +371,7 @@ def extract_inventors(
         out.append(
             inventor_raw.normalize_to(
                 value=inventor_val,
-                kind=EntityKind.INVENTOR,  # keep as PERSON, store role in meta
+                kind=EntityKind.INVENTOR,
                 system="PDF",
                 rule="inventors:normalize",
                 normalized=True,

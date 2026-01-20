@@ -9,7 +9,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional, Protocol, runtime_checkable
 
-from patent_ingest.pipeline import OrchestratorConfig, ingest_patent_pdf
+from patent_ingest.pipeline import (
+    OrchestratorConfig,
+    ingest_patent_pdf,
+    IngestionResult,
+)
 
 
 SCHEMA_VERSION = "1.0.0"
@@ -141,13 +145,21 @@ def _sha256(data: bytes) -> str:
     return h.hexdigest()
 
 
+@dataclass(frozen=True)
+class ParseResult:
+    ingested: IngestionResult
+    schema_version: str
+    doc_id: Optional[str]
+    pdf_sha256: Optional[str]
+
+
 def parse_patent(
     *,
     pdf_bytes: bytes | None = None,
     pdf_path: str | None = None,
     doc_id: str | None = None,
     options: ParseOptions | None = None,
-) -> Dict[str, Any]:
+) -> ParseResult:
     """Parse a patent PDF into structured data.
 
     Exactly one of pdf_bytes or pdf_path must be provided.
@@ -195,17 +207,12 @@ def parse_patent(
         # Pipeline supports artifact output_dir; we pass None to keep this pure.
         result = ingest_patent_pdf(pdf_path_use, output_dir=None, config=config)
 
-        # Stamp schema + identity + hashes (host can store this alongside pdf)
-        result.setdefault("schema_version", SCHEMA_VERSION)
-        if doc_id is not None:
-            result["doc_id"] = doc_id
-
         # Add sha256 if bytes were provided (recommended for host dedupe)
+        pdf_sha256: Optional[str] = None
         if pdf_bytes is not None:
-            result.setdefault("meta", {})
-            result["meta"].setdefault("pdf_sha256", _sha256(pdf_bytes))
+            pdf_sha256 = _sha256(pdf_bytes)
 
-        return result
+        return ParseResult(result, SCHEMA_VERSION, doc_id, pdf_sha256)
     finally:
         if tmp_path is not None:
             try:
@@ -236,7 +243,13 @@ def export_artifacts(
         raise ValueError("Provide exactly one of pdf_bytes or pdf_path.")
 
     spec = spec or ExportSpec()
-    doc_id = doc_id or parse_result.get("doc_id") or "unknown_doc"
+    doc_id = (
+        doc_id
+        or parse_result.doc_id
+        or parse_result.ingested.data.front_matter.patent_id.value
+        or "unknown_doc"
+    )
+    diag = parse_result.ingested.diagnostics
 
     # Materialize PDF to a local path for export routines.
     tmp_pdf_path: Optional[str] = None
@@ -253,90 +266,58 @@ def export_artifacts(
     with tempfile.TemporaryDirectory() as td:
         tmp_out = Path(td)
 
-        # 1) JSON exports
-        if spec.export_parsed_json:
-            key = f"{doc_id}/parsed.json"
-            manifest["artifacts"]["parsed_json"] = sink.put_json(key, parse_result)
-
         if spec.export_canonical_front_json:
-            # canonical_front_page lives in parse_front_page
-            from patent_ingest.parse_front_page import canonical_front_page
-
-            canonical = canonical_front_page(parse_result.get("front_matter") or {})
+            canonical = parse_result.ingested.data.front_matter.canonical()
             key = f"{doc_id}/front_canonical.json"
             manifest["artifacts"]["front_canonical_json"] = sink.put_json(
                 key, canonical
             )
 
         if spec.export_body_text:
-            body = parse_result.get("patent_body") or parse_result.get("body") or {}
-            text = ""
-            sections = body.get("sections") or {}
-            for k in ("background", "summary", "detailed_description"):
-                if sections.get(k):
-                    text += f"\n\n## {k.upper()}\n\n{sections.get(k)}\n"
-            key = f"{doc_id}/body_sections.txt"
-            manifest["artifacts"]["body_sections_text"] = sink.put_text(key, text)
+            canonical = parse_result.ingested.data.body.canonical_sections()
+            key = f"{doc_id}/body.json"
+            manifest["artifacts"]["body_canonical_json"] = sink.put_json(key, canonical)
+            canonical = parse_result.ingested.data.body.canonical_claims()
+            key = f"{doc_id}/claims.json"
+            manifest["artifacts"]["claims"] = sink.put_json(key, canonical)
+            canonical = parse_result.ingested.data.body.canonical_figures()
+            key = f"{doc_id}/figures.json"
+            manifest["artifacts"]["figures"] = sink.put_json(key, canonical)
 
         # 2) Drawing sheets / figure exports
         if spec.export_sheet_pdfs or spec.export_sheet_pngs or spec.export_figure_pngs:
+            print("Exporting drawing sheets and figures...")
             # To export we need to re-run drawing_sheets.process_drawing_sheets with output_dir.
-            from patent_ingest.drawing_sheets import process_drawing_sheets
+            from patent_ingest.drawing_sheets.export import export_drawing_artifacts
 
-            front = parse_result.get("front_matter") or {}
-            reported = front.get("reported_counts") or {}
-            expected_sheets = reported.get("reported_drawing_sheet_count")
-            qa_info = (front.get("qa") or {}).get("info") or {}
-            first_sheet = qa_info.get("drawings_start_index") or qa_info.get(
-                "drawings_start_index_inferred"
-            )
+            data = parse_result.ingested.data.drawing_sheets
 
-            if (
-                not isinstance(expected_sheets, int)
-                or expected_sheets <= 0
-                or not isinstance(first_sheet, int)
-            ):
-                # If we cannot export deterministically, record and skip.
-                manifest["artifacts"]["drawings_export_skipped"] = {
-                    "reason": "missing_expected_sheets_or_first_sheet_index",
-                    "expected_sheets": expected_sheets,
-                    "first_sheet_index": first_sheet,
-                }
-            else:
-                export_dir = tmp_out / "drawings"
-                export_dir.mkdir(parents=True, exist_ok=True)
+            export_dir = tmp_out / "drawings"
+            export_dir.mkdir(parents=True, exist_ok=True)
 
-                dr = process_drawing_sheets(
-                    pdf_path=pdf_path_use,
-                    drawing_sheets_expected=expected_sheets,
-                    first_drawing_sheet_index=first_sheet,
-                    output_dir=str(export_dir),
-                    export_pdf=spec.export_sheet_pdfs,
-                    export_png=spec.export_sheet_pngs,
-                    export_figures_png=spec.export_figure_pngs,
-                    detect_figures=True,
-                )
+            export_drawing_artifacts(data, export_dir, diag)
 
-                # Upload produced files
-                for path in export_dir.rglob("*"):
-                    if not path.is_file():
-                        continue
-                    rel = path.relative_to(export_dir).as_posix()
-                    key = f"{doc_id}/drawings/{rel}"
-                    ctype, _ = mimetypes.guess_type(str(path))
-                    ctype = ctype or "application/octet-stream"
-                    uri = sink.put_bytes(key, path.read_bytes(), content_type=ctype)
-                    # put into manifest buckets
-                    if rel.endswith(".pdf") and rel.startswith("sheets/"):
-                        manifest["artifacts"].setdefault("sheet_pdfs", []).append(uri)
-                    elif rel.endswith(".png") and rel.startswith("sheets_png/"):
-                        manifest["artifacts"].setdefault("sheet_pngs", []).append(uri)
-                    elif rel.endswith(".png") and (
-                        "figures" in rel or "figures_png" in rel
-                    ):
-                        manifest["artifacts"].setdefault("figure_pngs", []).append(uri)
-                    else:
-                        manifest["artifacts"].setdefault("other", []).append(uri)
+            # Upload produced files
+            for path in export_dir.rglob("*"):
+                print(f"Found exported file: {path}")
+                if not path.is_file():
+                    continue
+                rel = path.relative_to(export_dir).as_posix()
+                key = f"{doc_id}/drawings/{rel}"
+                ctype, _ = mimetypes.guess_type(str(path))
+                ctype = ctype or "application/octet-stream"
+                uri = sink.put_bytes(key, path.read_bytes(), content_type=ctype)
+                # put into manifest buckets
+                if rel.endswith(".pdf") and rel.startswith("sheets/"):
+                    manifest["artifacts"].setdefault("sheet_pdfs", []).append(uri)
+                elif rel.endswith(".png") and rel.startswith("sheets_png/"):
+                    manifest["artifacts"].setdefault("sheet_pngs", []).append(uri)
+                elif rel.endswith(".png") and (
+                    "figures" in rel or "figures_png" in rel
+                ):
+                    manifest["artifacts"].setdefault("figure_pngs", []).append(uri)
+                else:
+                    manifest["artifacts"].setdefault("other", []).append(uri)
 
     if tmp_pdf_path is not None:
         try:

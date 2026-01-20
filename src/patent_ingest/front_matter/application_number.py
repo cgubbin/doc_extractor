@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any, Optional, Tuple
 
+from patent_ingest.diagnostics import Diagnostics
 from patent_ingest.model.document import MultiPage
 from patent_ingest.model.span import Span, Column, Position, Where
 from patent_ingest.parsed import ParsedRaw, ParsedNorm, INIDKind, EntityKind
@@ -238,81 +239,88 @@ def find_first_application_no_fallback(doc: MultiPage) -> Optional[ParsedRaw[str
 def extract_application_number(
     doc: MultiPage,
     inid_blocks: dict[INIDKind, ParsedRaw[str]],
+    diag: Diagnostics,
 ) -> Optional[ParsedNorm[str]]:
-    """
-    Returns ParsedNorm[str] where value is a normalized US application number if possible,
-    else best cleaned value. Provenance is preserved in where/raw_text/meta.
+    field = "application_number"
 
-    Policy:
-      - Prefer INID (21) IF it cleans to something that validates.
-      - If INID(21) exists but is invalid -> record rejection and fallback.
-      - Fallback: first match in page0/right, then validate/normalize.
-    """
-    rejections: list[dict[str, Any]] = []
-
-    # 1) Try INID(21) if available
-    inid21 = inid_blocks.get(INIDKind._21) if hasattr(INIDKind, "_21") else None
-    if inid21:
-        cleaned = _clean_application_slice(
-            inid21.retag(
-                EntityKind.APPLICATION_ID, rule="retag INID(21)->APPLICATION_ID"
-            )
+    inid21 = inid_blocks.get(INIDKind._21)
+    if inid21 and (inid21.text or "").strip():
+        tagged = inid21.retag(
+            EntityKind.APPLICATION_ID,
+            rule="appl-no:retag inid21",
+            source="inid",
+            inid_code="21",
         )
-        if cleaned.text:
-            if validate_us_application_no_text(cleaned.text):
-                norm = normalize_us_application_no(cleaned.text)
-                value = norm or cleaned.text
-                return cleaned.normalize_to(
-                    value=value,
-                    kind=EntityKind.APPLICATION_ID,
-                    system="USPTO",
-                    rule="appl-no:from-inid21",
-                    normalized=bool(norm),
-                    normalized_value=norm,
-                    rejections=rejections,
-                    source="inid",
-                    inid_code="21",
-                )
-            else:
-                rejections.append(
-                    {
-                        "source": "inid",
-                        "inid_code": "21",
-                        "reason": "invalid application number format after cleaning",
-                        "sample": cleaned.excerpt(120),
-                    }
-                )
+        cleaned = _clean_application_slice(tagged)
 
-    # 2) Fallback: first suitable substring in page0/right
+        if cleaned.text and validate_us_application_no_text(cleaned.text):
+            norm = normalize_us_application_no(cleaned.text)
+            value = norm or cleaned.text
+            if norm is None:
+                diag.warn(
+                    "appl_no.un_normalized",
+                    "INID(21) looked like an application number but normalization failed; returning cleaned text.",
+                    field=field,
+                    where=cleaned.where,
+                    raw=cleaned.text[:160],
+                    inid="21",
+                )
+            return cleaned.normalize_to(
+                value=value,
+                kind=EntityKind.APPLICATION_ID,
+                system="USPTO",
+                rule="appl-no:inid21",
+                normalized=bool(norm),
+                normalized_value=norm,
+                source="inid",
+                inid_code="21",
+            )
+
+        diag.warn(
+            "appl_no.inid_invalid",
+            "INID(21) present but not a valid US application number; attempting fallback.",
+            field=field,
+            where=inid21.where,
+            raw=(inid21.text or "")[:160],
+            inid="21",
+        )
+
     fb = find_first_application_no_fallback(doc)
-    if not fb or not fb.text:
+    if fb:
+        cleaned_fb = _clean_application_slice(fb)
+        if cleaned_fb.text and validate_us_application_no_text(cleaned_fb.text):
+            norm = normalize_us_application_no(cleaned_fb.text)
+            value = norm or cleaned_fb.text
+            if norm is None:
+                diag.warn(
+                    "appl_no.fallback_un_normalized",
+                    "Fallback found an application number but normalization failed; returning cleaned text.",
+                    field=field,
+                    where=cleaned_fb.where,
+                    raw=cleaned_fb.text[:160],
+                )
+            return cleaned_fb.normalize_to(
+                value=value,
+                kind=EntityKind.APPLICATION_ID,
+                system="USPTO",
+                rule="appl-no:fallback",
+                normalized=bool(norm),
+                normalized_value=norm,
+                source="fallback",
+            )
+
+        diag.error(
+            "appl_no.fallback_invalid",
+            "Fallback matched, but the captured value is not a valid US application number.",
+            field=field,
+            where=fb.where,
+            raw=(fb.text or "")[:160],
+        )
         return None
 
-    cleaned_fb = _clean_application_slice(fb)  # usually no-op, but consistent
-    if not validate_us_application_no_text(cleaned_fb.text):
-        # Still return something if you want “best effort”; or return None.
-        # Here: best-effort with validated=False.
-        return cleaned_fb.normalize_to(
-            value=cleaned_fb.text,
-            kind=EntityKind.APPLICATION_ID,
-            system="USPTO",
-            rule="appl-no:fallback-but-invalid",
-            normalized=False,
-            normalized_value=None,
-            rejections=rejections,
-            source="fallback",
-            validation_error="invalid application number format",
-        )
-
-    norm = normalize_us_application_no(cleaned_fb.text)
-    value = norm or cleaned_fb.text
-    return cleaned_fb.normalize_to(
-        value=value,
-        kind=EntityKind.APPLICATION_ID,
-        system="USPTO",
-        rule="appl-no:fallback",
-        normalized=bool(norm),
-        normalized_value=norm,
-        rejections=rejections,
-        source="fallback",
+    diag.error(
+        "appl_no.missing",
+        "No application number found in INID(21) or fallback.",
+        field=field,
     )
+    return None

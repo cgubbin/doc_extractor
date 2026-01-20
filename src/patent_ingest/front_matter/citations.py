@@ -1,212 +1,27 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union, Literal
+from dataclasses import dataclass
+from typing import List, Optional, Tuple, Literal
 import re
 
-
-# =============================================================================
-# Document model
-# =============================================================================
-
-
-class Column(Enum):
-    LEFT = "left"
-    RIGHT = "right"
-
-
-@dataclass(frozen=True)
-class TwoColumn:
-    left: str
-    right: str
-
-
-@dataclass(frozen=True)
-class MultiPage:
-    pages: List[TwoColumn]
-
-    def get_column_text(self, page: int, column: Column) -> str:
-        p = self.pages[page]
-        return p.left if column is Column.LEFT else p.right
-
-
-# =============================================================================
-# Span model
-# =============================================================================
-
-
-@dataclass(frozen=True, order=True)
-class Position:
-    page: int
-    column: Column
-    offset: int
-
-
-@dataclass(frozen=True)
-class Span:
-    """Half-open [start, end), must be within one (page, column)."""
-
-    start: Position
-    end: Position
-
-    def __post_init__(self) -> None:
-        if (self.start.page, self.start.column) != (self.end.page, self.end.column):
-            raise ValueError(
-                "Span must be within one page+column; use MultiSpan for cross boundaries."
-            )
-        if self.end.offset < self.start.offset:
-            raise ValueError("Span end must be >= start.")
-
-
-@dataclass(frozen=True)
-class MultiSpan:
-    parts: Tuple[Span, ...]
-
-
-Where = Union[Span, MultiSpan]
-
-
-def _span_sort_key(s: Span) -> Tuple[int, int, int, int]:
-    col_ord = 0 if s.start.column is Column.LEFT else 1
-    return (s.start.page, col_ord, s.start.offset, s.end.offset)
-
-
-def coalesce_spans(spans: Sequence[Span]) -> List[Span]:
-    if not spans:
-        return []
-    spans_sorted = sorted(spans, key=_span_sort_key)
-    out: List[Span] = []
-    cur = spans_sorted[0]
-    for s in spans_sorted[1:]:
-        same_seg = (s.start.page, s.start.column) == (cur.start.page, cur.start.column)
-        if same_seg and s.start.offset <= cur.end.offset:
-            new_end = Position(
-                cur.end.page, cur.end.column, max(cur.end.offset, s.end.offset)
-            )
-            cur = Span(cur.start, new_end)
-        else:
-            out.append(cur)
-            cur = s
-    out.append(cur)
-    return out
-
-
-def merge_where(a: Where, b: Where) -> Where:
-    parts: List[Span] = []
-    parts.extend(a.parts if isinstance(a, MultiSpan) else (a,))
-    parts.extend(b.parts if isinstance(b, MultiSpan) else (b,))
-    parts = coalesce_spans(parts)
-    return parts[0] if len(parts) == 1 else MultiSpan(parts=tuple(parts))
-
-
-# =============================================================================
-# Parsed containers
-# =============================================================================
-
-
-@dataclass(frozen=True)
-class ParsedRaw:
-    kind: str
-    where: Where
-    text: str
-    confidence: Optional[float] = None
-    meta: Dict[str, Any] = field(default_factory=dict)
-
-    def normalize_to(
-        self, value: Any, *, kind: Optional[str] = None, **meta_updates: Any
-    ) -> "ParsedNorm":
-        meta = dict(self.meta)
-        meta.update(meta_updates)
-        return ParsedNorm(
-            kind=kind or self.kind,
-            where=self.where,
-            raw_text=self.text,
-            value=value,
-            confidence=self.confidence,
-            meta=meta,
-        )
-
-
-@dataclass(frozen=True)
-class ParsedNorm:
-    kind: str
-    where: Where
-    raw_text: str
-    value: Any
-    confidence: Optional[float] = None
-    meta: Dict[str, Any] = field(default_factory=dict)
-
-
-# =============================================================================
-# Linearization + mapping
-# =============================================================================
-
-
-@dataclass(frozen=True)
-class Segment:
-    page: int
-    column: Column
-    text: str
-    global_start: int
-    global_end: int
-
-
-def linearize(
-    doc: MultiPage,
-    *,
-    sep: str = "\n",
-    order: Tuple[Column, Column] = (Column.LEFT, Column.RIGHT),
-) -> Tuple[str, List[Segment]]:
-    segments: List[Segment] = []
-    chunks: List[str] = []
-    cursor = 0
-    for pageno, page in enumerate(doc.pages):
-        for col in order:
-            txt = page.left if col is Column.LEFT else page.right
-            chunks.append(txt)
-            segments.append(
-                Segment(
-                    page=pageno,
-                    column=col,
-                    text=txt,
-                    global_start=cursor,
-                    global_end=cursor + len(txt),
-                )
-            )
-            cursor += len(txt)
-            chunks.append(sep)  # no provenance
-            cursor += len(sep)
-    return "".join(chunks), segments
-
-
-def trim_global_range(text: str, start: int, end: int) -> Tuple[int, int]:
-    s, e = start, end
-    while s < e and text[s].isspace():
-        s += 1
-    while e > s and text[e - 1].isspace():
-        e -= 1
-    return s, e
-
-
-def global_range_to_where(
-    global_start: int, global_end: int, segments: List[Segment]
-) -> Where:
-    parts: List[Span] = []
-    for seg in segments:
-        a = max(global_start, seg.global_start)
-        b = min(global_end, seg.global_end)
-        if b <= a:
-            continue
-        s = Position(seg.page, seg.column, a - seg.global_start)
-        e = Position(seg.page, seg.column, b - seg.global_start)
-        parts.append(Span(s, e))
-    if not parts:
-        raise ValueError(
-            "Global range did not overlap any segment (maybe only separators)."
-        )
-    parts = coalesce_spans(parts)
-    return parts[0] if len(parts) == 1 else MultiSpan(parts=tuple(parts))
+from patent_ingest.model.document import MultiPage
+from patent_ingest.diagnostics import Diagnostics
+from patent_ingest.model.mapping import (
+    Segment,
+    linearize,
+    global_range_to_where,
+    trim_global_range,
+)
+from patent_ingest.model.span import (
+    Column,
+    Span,
+    MultiSpan,
+    Where,
+    merge_where,
+    coalesce_spans,
+    _span_sort_key,
+)
+from patent_ingest.parsed import ParsedNorm, ParsedRaw
 
 
 # =============================================================================
@@ -671,8 +486,129 @@ def local_span_to_where(
 # =============================================================================
 
 
+# def extract_citations(
+#     doc: MultiPage,
+#     *,
+#     max_pages: Optional[int] = None,
+#     scan_limit: int = 10,
+#     sep: str = "\n",
+#     order: Tuple[Column, Column] = (Column.LEFT, Column.RIGHT),
+#     own_patent_digits: Optional[str] = None,  # exclude self-citation for grants
+#     exclude_pubapp_canonicals: Optional[set[str]] = None,
+# ) -> List[ParsedNorm]:
+#     """
+#     Extract US grant + US published application citations from the references region.
+#
+#     Returns list[ParsedNorm] with value= CitationId.
+#
+#     Guardrails:
+#       - foreign prefixes (WO/EP/JP/...) are excluded for pub-app matches
+#       - narrative continuation/related-app prose is excluded for both grants and pubapps
+#       - related-app blocks are masked in the region builder to prevent matches inside them
+#     """
+#     exclude_pubapp_canonicals = exclude_pubapp_canonicals or set()
+#
+#     # We need segments for mapping. linear_text is not used directly here.
+#     _linear_text, segments = linearize(doc, sep=sep, order=order)
+#
+#     region = build_references_region(
+#         doc, max_pages=max_pages, scan_limit=scan_limit, sep=sep, order=order
+#     )
+#     if not region.text.strip():
+#         return []
+#
+#     # Span-safe normalization (length-preserving)
+#     t = normalize_separators_for_refs(region.text)
+#     t = fix_common_ocr_al_to_a1(t)
+#
+#     out: List[ParsedNorm] = []
+#     seen: set[tuple[str, str]] = set()  # (type, canonical)
+#
+#     # ---- US grants (grouped) ----
+#     for m in US_PATENT_GROUPED_PAT.finditer(t):
+#         if is_narrative_context(t, m.start()):
+#             continue
+#
+#         digits = f"{m.group(1)}{m.group(2)}{m.group(3)}"
+#         if own_patent_digits and digits == own_patent_digits:
+#             continue
+#         key = ("US_GRANT", digits)
+#         if key in seen:
+#             continue
+#         seen.add(key)
+#
+#         loc_s, loc_e = m.span(0)
+#         where = local_span_to_where(loc_s, loc_e, region.pieces, segments)
+#         display = comma_format_us_patent(digits)
+#         value = CitationId(type="US_GRANT", canonical=digits, display=display)
+#
+#         raw = ParsedRaw(
+#             kind="CITATION_ID",
+#             where=where,
+#             text=t[loc_s:loc_e],
+#             confidence=0.55,
+#         meta={
+#             "source": "refs-region",
+#             "rule": "citations:us-grant-grouped",
+#             "pages_used": region.pages_used,
+#         },
+#     )
+#     out.append(raw.normalize_to(value=value, kind="CITATION_ID", normalized=True))
+#
+# # ---- US published applications ----
+# for m in US_PUB_APP_PAT.finditer(t):
+#     if is_foreign_publication_context(t, m.start()):
+#         continue
+#     if is_narrative_context(t, m.start()):
+#         continue
+#
+#     year = m.group(1)
+#     serial_raw = m.group(2)
+#     kind_code = (m.group(3) or "").upper()
+#
+#     canon = normalize_us_pub_app(year, serial_raw)
+#     if not canon:
+#         continue
+#     if canon in exclude_pubapp_canonicals:
+#         continue
+#
+#     key = ("US_PUBAPP", canon)
+#     if key in seen:
+#         continue
+#     seen.add(key)
+#
+#     loc_s, loc_e = m.span(0)
+#     where = local_span_to_where(loc_s, loc_e, region.pieces, segments)
+#
+#     serial_digits = re.sub(r"\D", "", serial_raw.upper().replace("O", "0"))
+#     if len(serial_digits) < 7:
+#         serial_digits = serial_digits.zfill(7)
+#     display = f"{year}/{serial_digits} {kind_code}".strip()
+#
+#     value = CitationId(
+#         type="US_PUBAPP", canonical=canon, display=display, kind_code=kind_code
+#     )
+#
+#     raw = ParsedRaw(
+#         kind="CITATION_ID",
+#         where=where,
+#         text=t[loc_s:loc_e],
+#         confidence=0.55,
+#         meta={
+#             "source": "refs-region",
+#             "rule": "citations:us-pubapp",
+#             "pages_used": region.pages_used,
+#         },
+#     )
+#     out.append(raw.normalize_to(value=value, kind="CITATION_ID", normalized=True))
+#
+# return out
+#
+
+
 def extract_citations(
     doc: MultiPage,
+    diag: Diagnostics,
     *,
     max_pages: Optional[int] = None,
     scan_limit: int = 10,
@@ -682,15 +618,19 @@ def extract_citations(
     exclude_pubapp_canonicals: Optional[set[str]] = None,
 ) -> List[ParsedNorm]:
     """
-    Extract US grant + US published application citations from the references region.
+    Same behavior as your original extract_citations(), but with Diagnostics added.
 
-    Returns list[ParsedNorm] with value= CitationId.
-
-    Guardrails:
+    Guardrails (unchanged):
       - foreign prefixes (WO/EP/JP/...) are excluded for pub-app matches
       - narrative continuation/related-app prose is excluded for both grants and pubapps
       - related-app blocks are masked in the region builder to prevent matches inside them
+
+    Diagnostics:
+      - WARN if references region is missing
+      - INFO for exclusions (foreign / narrative / self / excluded list)
+      - WARN if region exists but no citations extracted
     """
+    field = "citations"
     exclude_pubapp_canonicals = exclude_pubapp_canonicals or set()
 
     # We need segments for mapping. linear_text is not used directly here.
@@ -700,6 +640,11 @@ def extract_citations(
         doc, max_pages=max_pages, scan_limit=scan_limit, sep=sep, order=order
     )
     if not region.text.strip():
+        diag.warn(
+            "citations.region_missing",
+            "No references-cited region found; returning no citations.",
+            field=field,
+        )
         return []
 
     # Span-safe normalization (length-preserving)
@@ -712,11 +657,26 @@ def extract_citations(
     # ---- US grants (grouped) ----
     for m in US_PATENT_GROUPED_PAT.finditer(t):
         if is_narrative_context(t, m.start()):
+            diag.info_msg(
+                "citations.excluded_narrative",
+                "Excluded grouped patent-like token in narrative context.",
+                field=field,
+                raw=t[m.start() : m.end()],
+                meta={"rule": "narrative_context"},
+            )
             continue
 
         digits = f"{m.group(1)}{m.group(2)}{m.group(3)}"
         if own_patent_digits and digits == own_patent_digits:
+            diag.info_msg(
+                "citations.excluded_self",
+                "Excluded self-citation (same as own patent).",
+                field=field,
+                raw=m.group(0),
+                meta={"own_patent_digits": own_patent_digits},
+            )
             continue
+
         key = ("US_GRANT", digits)
         if key in seen:
             continue
@@ -743,8 +703,22 @@ def extract_citations(
     # ---- US published applications ----
     for m in US_PUB_APP_PAT.finditer(t):
         if is_foreign_publication_context(t, m.start()):
+            diag.info_msg(
+                "citations.excluded_foreign",
+                "Excluded publication-like token preceded by foreign authority prefix (WO/EP/JP/...).",
+                field=field,
+                raw=t[m.start() : m.end()],
+            )
             continue
+
         if is_narrative_context(t, m.start()):
+            diag.info_msg(
+                "citations.excluded_narrative",
+                "Excluded publication-like token in narrative context.",
+                field=field,
+                raw=t[m.start() : m.end()],
+                meta={"rule": "narrative_context"},
+            )
             continue
 
         year = m.group(1)
@@ -753,8 +727,23 @@ def extract_citations(
 
         canon = normalize_us_pub_app(year, serial_raw)
         if not canon:
+            diag.info_msg(
+                "citations.pubapp_canon_failed",
+                "Matched publication-like token but canonicalization failed.",
+                field=field,
+                raw=m.group(0),
+                meta={"year": year, "serial_raw": serial_raw, "kind_code": kind_code},
+            )
             continue
+
         if canon in exclude_pubapp_canonicals:
+            diag.info_msg(
+                "citations.pubapp_excluded",
+                "Excluded publication canonical per caller-supplied exclude list.",
+                field=field,
+                raw=m.group(0),
+                meta={"canonical": canon},
+            )
             continue
 
         key = ("US_PUBAPP", canon)
@@ -771,7 +760,10 @@ def extract_citations(
         display = f"{year}/{serial_digits} {kind_code}".strip()
 
         value = CitationId(
-            type="US_PUBAPP", canonical=canon, display=display, kind_code=kind_code
+            type="US_PUBAPP",
+            canonical=canon,
+            display=display,
+            kind_code=kind_code,
         )
 
         raw = ParsedRaw(
@@ -786,5 +778,13 @@ def extract_citations(
             },
         )
         out.append(raw.normalize_to(value=value, kind="CITATION_ID", normalized=True))
+
+    if not out:
+        diag.warn(
+            "citations.none_found",
+            "References-cited region found, but no citations were extracted after filtering.",
+            field=field,
+            meta={"pages_used": region.pages_used},
+        )
 
     return out

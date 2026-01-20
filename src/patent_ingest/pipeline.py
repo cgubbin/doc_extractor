@@ -21,22 +21,22 @@ at the top accordingly; the orchestration logic should remain stable.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from enum import Enum
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
-from pypdf import PdfReader
 
 # --- Imports from your existing modules ---
 # Adjust these import paths if your package structure differs.
-from patent_ingest.parse_front_page import (
+from patent_ingest.front_matter.model import (
+    FrontMatterData,
     parse_front_matter,
 )
-from patent_ingest.front_matter.model import FrontMatter
-from patent_ingest.parse_body import parse_patent_body
-from patent_ingest.drawing_sheets import process_drawing_sheets
-from patent_ingest.utils import infer_drawings_start_index
-from patent_ingest.assembler import assemble_parsed_patent
+from patent_ingest.body.parse import parse_patent_body_fallible, PatentBodyData
+from patent_ingest.drawing_sheets.model import parse_drawing_sheets, DrawingSheetsData
+from patent_ingest.model.document import read_pdf_to_multipage
+from patent_ingest.diagnostics import Diagnostics
 
 
 @dataclass(frozen=True)
@@ -54,6 +54,54 @@ class OrchestratorConfig:
     segment_drawings: bool = True
 
 
+class IngestStatus(str, Enum):
+    OK = "ok"
+    PARTIAL = "partial"
+    FAILED = "failed"
+
+
+@dataclass(frozen=True)
+class IngestionData:
+    front_matter: FrontMatterData
+    drawing_sheets: DrawingSheetsData
+    body: PatentBodyData
+
+
+@dataclass(frozen=True)
+class IngestionResult:
+    status: IngestStatus
+    diagnostics: Diagnostics
+    data: Optional[IngestionData] = None
+    meta: Dict[str, Any] = field(
+        default_factory=dict
+    )  # optional: pages_used, version, etc.
+
+
+@dataclass(frozen=True)
+class IngestPolicy:
+    required_fields: tuple[str, ...] = ("patent_id",)
+    fail_on_error: bool = False  # batch-friendly default
+    warn_on_missing_optional: bool = True
+
+
+def determine_status(
+    data: Optional[IngestionData], diag: Diagnostics, policy: IngestPolicy
+) -> IngestStatus:
+    if data is None:
+        return IngestStatus.FAILED
+    if diag.errors:
+        return IngestStatus.FAILED if policy.fail_on_error else IngestStatus.PARTIAL
+
+    # If required fields missing, treat as failure/partial depending on policy
+    for f in policy.required_fields:
+        v = getattr(data, f, None)
+        missing = (v is None) or (isinstance(v, list) and not v)
+        if missing:
+            return IngestStatus.FAILED if policy.fail_on_error else IngestStatus.PARTIAL
+
+    return IngestStatus.OK
+
+
 def _safe_mkdir(p: Optional[str | Path]) -> Optional[Path]:
     if p is None:
         return None
@@ -62,47 +110,13 @@ def _safe_mkdir(p: Optional[str | Path]) -> Optional[Path]:
     return out
 
 
-def _aggregate_qa(*qa_blocks: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    warnings: List[str] = []
-    info: Dict[str, Any] = {}
-    for qa in qa_blocks:
-        if not qa:
-            continue
-        warnings.extend(list(qa.get("warnings") or []))
-        # merge info shallowly; later keys win (fine for orchestration)
-        info.update(dict(qa.get("info") or {}))
-    # de-duplicate while preserving order
-    seen = set()
-    deduped = []
-    for w in warnings:
-        if w not in seen:
-            seen.add(w)
-            deduped.append(w)
-    return {"warnings": deduped, "info": info}
-
-
-def _build_front_matter_pages_text(
-    reader: PdfReader,
-    *,
-    pages_to_scan: int,
-) -> FrontMatter:
-    # n = min(pages_to_scan, len(reader.pages))
-    n = min(pages_to_scan, reader.page_count)
-    # pages = [extract_page0_text(reader)]
-    # for i in range(1, n):
-    # Keep parity with your existing code: front-page flag only for page 0
-    # pages.append(extract_front_matter_text(reader, i, is_front_page=False) or "")
-
-    return FrontMatter(reader, range(n))
-
-
 def ingest_patent_pdf(
-    pdf_path: str | Path,
+    path: str | Path,
     *,
     output_dir: str | Path | None = None,
     config: OrchestratorConfig = OrchestratorConfig(),
-    front_matter_pages_to_scan: Optional[int] = None,  # still allowed as override/debug
-) -> Dict[str, Any]:
+    policy: IngestPolicy = IngestPolicy(),
+) -> IngestionResult:
     """
     End-to-end pipeline:
       1) Front matter (multi-page)
@@ -118,168 +132,89 @@ def ingest_patent_pdf(
         qa
       }
     """
-    import pymupdf  # noqa: F401
+    diag = Diagnostics()
+    try:
+        doc = read_pdf_to_multipage(path)
+    except Exception as e:
+        diag.error(
+            "pdf.read_failure",
+            f"Failed to read PDF at {path}: {e}",
+            exception=e,
+        )
+        return IngestionResult(
+            status=IngestStatus.FAILED, data=None, diagnostics=diag, meta={"path": path}
+        )
 
-    pdf_path = str(pdf_path)
-    out_root = _safe_mkdir(output_dir)
+    try:
+        result = parse_front_matter(doc)  # returns FrontMatterResult(data, diagnostics)
+        diag.merge(result.diagnostics)
+        front_matter_data = result.data
+    except Exception as e:
+        diag.error(
+            "parse.exception", f"Unhandled exception during parsing: {e}", field="parse"
+        )
+        return IngestionResult(
+            status=IngestStatus.FAILED, data=None, diagnostics=diag, meta={"path": path}
+        )
 
-    reader = PdfReader(pdf_path)
-    doc = pymupdf.open(pdf_path)
-    pdf_num_pages = len(reader.pages)
-
-    # -----------------------
-    # Step 1: minimal parse (page 0 only) to get reported drawing sheet count (and claim count)
-    # -----------------------
-    front_matter = _build_front_matter_pages_text(
-        doc, pages_to_scan=min(1, pdf_num_pages)
+    # partition the pdf:
+    num_front_pages = front_matter_data.num_sheets
+    num_drawing_pages = (
+        front_matter_data.reported_counts.value.reported_drawing_sheet_count
     )
-    parsed = front_matter.parse()
-    print("=== Initial Front-matter parsing complete ===")
-    print(parsed)
-    raise NotImplementedError("Update to use your existing front-matter parsing logic")
-    front_min = parse_front_matter(pages_text_min, max_pages=len(pages_text_min))
-
-    reported_counts = front_min.get("reported_counts") or {}
-    expected_sheet_count = reported_counts.get("reported_drawing_sheet_count")
-    expected_claim_count = reported_counts.get("reported_claim_count")
-
-    # -----------------------
-    # Step 1b: determine front-matter boundary (drawings_start_index)
-    # -----------------------
-    drawings_start_index = None
-    inference_used = False
-
-    if (
-        front_matter_pages_to_scan is None
-        and isinstance(expected_sheet_count, int)
-        and expected_sheet_count > 0
-    ):
-        # Prefer explicit "Sheet i of n" detection if available in your helper;
-        # else fallback to score-based inference.
-        drawings_start_index = infer_drawings_start_index(reader, expected_sheet_count)
-        inference_used = True
-
-    if front_matter_pages_to_scan is not None:
-        pages_to_scan = min(front_matter_pages_to_scan, pdf_num_pages)
-        inference_used = False
-    else:
-        if drawings_start_index is None:
-            # Conservative fallback: parse first 3 pages as front matter, but emit warning.
-            pages_to_scan = min(3, pdf_num_pages)
-        else:
-            pages_to_scan = min(drawings_start_index, pdf_num_pages)
-
-    # -----------------------
-    # Step 1c: full front matter parse up to boundary
-    # -----------------------
-    pages_text = _build_front_matter_pages_text(reader, pages_to_scan=pages_to_scan)
-    front = parse_front_matter(pages_text, max_pages=len(pages_text))
-
-    front.setdefault("qa", {}).setdefault("info", {})
-    front["qa"]["info"].update(
-        {
-            "front_matter_pages_inferred": inference_used,
-            "front_matter_pages_scanned": len(pages_text),
-            "drawings_start_index_inferred": drawings_start_index,
-        }
+    total_pages = len(doc)
+    remaining_doc = doc.subset(
+        pages=range(num_front_pages + num_drawing_pages, total_pages)
     )
 
-    # Use the “full” front parse if it has better values
-    reported_counts_full = front.get("reported_counts") or {}
-    expected_sheet_count = reported_counts_full.get(
-        "reported_drawing_sheet_count", expected_sheet_count
-    )
-    expected_claim_count = reported_counts_full.get(
-        "reported_claim_count", expected_claim_count
-    )
+    try:
+        pages = [
+            ii for ii in range(num_front_pages, num_front_pages + num_drawing_pages)
+        ]
+        result = parse_drawing_sheets(path, pages, diag)  # returns DrawingSheetsResult
+        diag.merge(result.diagnostics)
+        drawing_sheets_data = result.data
+    except Exception as e:
+        diag.error(
+            "parse.exception", f"Unhandled exception during parsing: {e}", field="parse"
+        )
+        return IngestionResult(
+            status=IngestStatus.FAILED, data=None, diagnostics=diag, meta={"path": path}
+        )
 
-    # -----------------------
-    # Step 2: drawing sheets
-    # -----------------------
-    drawings_out_dir = None
-    if out_root is not None:
-        drawings_out_dir = out_root / "drawings"
-        drawings_out_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        result = parse_patent_body_fallible(doc=remaining_doc)
+        diag.merge(result.diagnostics)
+        patent_body_data = result.data
+    except Exception as e:
+        diag.error(
+            "parse.exception", f"Unhandled exception during parsing: {e}", field="parse"
+        )
+        return IngestionResult(
+            status=IngestStatus.FAILED, data=None, diagnostics=diag, meta={"path": path}
+        )
 
-    drawings = process_drawing_sheets(
-        pdf_path,
-        drawing_sheets_expected=expected_sheet_count,
-        first_drawing_sheet_index=drawings_start_index,
-        output_dir=str(drawings_out_dir) if drawings_out_dir else None,
-        export_pdf=config.export_pdf,
-        max_pages_scan=10,
-        detect_figures=True,
-        export_figures_png=config.export_png,
-        export_png=config.export_png,
-    )
-
-    drawing_sheets = (
-        drawings.get("drawing_sheets") if isinstance(drawings, dict) else drawings
-    )
-    sheet_count = (drawing_sheets or {}).get("sheet_count")
-    drawing_count_total = (drawing_sheets or {}).get(
-        "drawing_count_total"
-    )  # may be None if not segmented
-
-    # Determine body start index deterministically:
-    # if we know drawings start and count, body starts right after drawings.
-    body_start_index = None
-    if (
-        isinstance(drawings_start_index, int)
-        and isinstance(sheet_count, int)
-        and sheet_count > 0
-    ):
-        body_start_index = drawings_start_index + sheet_count
-
-    # -----------------------
-    # Step 3: patent body (remaining pages)
-    # -----------------------
-    body_out_dir = None
-    if out_root is not None:
-        body_out_dir = out_root / "body"
-        body_out_dir.mkdir(parents=True, exist_ok=True)
-
-    patent_body = parse_patent_body(
-        pdf_path=pdf_path,
-        start_page_index=body_start_index,  # may be None; module must handle gracefully + QA
-        output_dir=str(body_out_dir) if body_out_dir else None,
-        expected_claim_count=expected_claim_count,
-        expected_drawing_count=drawing_count_total,
-        expected_sheet_count=expected_sheet_count,
+    result = IngestionResult(
+        status=determine_status(
+            data=IngestionData(
+                front_matter=front_matter_data,
+                drawing_sheets=drawing_sheets_data,
+                body=patent_body_data,
+            ),
+            diag=diag,
+            policy=policy,
+        ),
+        data=IngestionData(
+            front_matter=front_matter_data,
+            drawing_sheets=drawing_sheets_data,
+            body=patent_body_data,
+        ),
+        diagnostics=diag,
+        meta={
+            "path": path,
+            "front_matter_pages_scanned": front_matter_data.num_sheets,
+            "drawing_sheets_pages_scanned": drawing_sheets_data.num_sheets,
+        },
     )
 
-    # -----------------------
-    # Aggregate QA
-    # -----------------------
-    qa = _aggregate_qa(
-        front.get("qa"),
-        drawings.get("qa") if isinstance(drawings, dict) else None,
-        patent_body.get("qa"),
-    )
-    qa.setdefault("info", {})
-    qa["info"].update(
-        {
-            "pdf_path": pdf_path,
-            "pdf_num_pages": pdf_num_pages,
-            "drawings_start_index": drawings_start_index,
-            "body_start_index": body_start_index,
-            "expected_claim_count": expected_claim_count,
-            "expected_sheet_count": expected_sheet_count,
-            "expected_drawing_count": drawing_count_total,
-        }
-    )
-
-    assembled = assemble_parsed_patent(
-        pdf_path=pdf_path,
-        front_matter=front,
-        drawing_result=drawings,
-        body_result=patent_body,
-    )
-
-    print("=== Ingestion complete ===")
-    print("Document consistency:")
-    print(assembled["consistency"])
-    print("Document qa:")
-    print(assembled["qa"])
-
-    return assembled
+    return result

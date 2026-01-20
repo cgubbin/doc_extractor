@@ -1,4 +1,3 @@
-# """
 # CLI entry point for patent_ingest.
 #
 # Examples:
@@ -253,17 +252,17 @@
 
 def main(argv: list[str] | None = None) -> int:
     import argparse
-    import json
     import sys
     from pathlib import Path
+    import json
 
+    from patent_ingest.pipeline import IngestStatus
     from patent_ingest.api import (
-        ExportSpec,
         FileSystemSink,
         export_artifacts,
+        ExportSpec,
         parse_patent,
     )
-    from patent_ingest.parse_front_page import canonical_front_page
 
     parser = argparse.ArgumentParser(
         prog="patent_ingest",
@@ -312,6 +311,25 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Export artifacts (JSON, drawing sheets, figure PNGs) into --export-dir using a filesystem sink",
     )
+
+    parser.add_argument(
+        "--export-sheet-pdfs",
+        action="store_true",
+        help="Export sheets as pdf files",
+    )
+
+    parser.add_argument(
+        "--export-sheet-pngs",
+        action="store_true",
+        help="Export sheets as png files",
+    )
+
+    parser.add_argument(
+        "--export-figure-pngs",
+        action="store_true",
+        help="Export figures as png files",
+    )
+
     parser.add_argument(
         "--export-dir",
         type=Path,
@@ -346,55 +364,66 @@ def main(argv: list[str] | None = None) -> int:
     # ------------------------
     # Parse (pure; no exports)
     # ------------------------
-    result = parse_patent(pdf_path=str(args.pdf), doc_id=args.doc_id)
+    try:
+        result = parse_patent(pdf_path=str(args.pdf), doc_id=args.doc_id)
+    except Exception as e:
+        raise e
+
+    if result.ingested.status == IngestStatus.FAILED:
+        raise RuntimeError(f"Patent ingest failed: {result.error_message}")
+
+    data = result.ingested.data
+    if data is None:
+        raise RuntimeError("Patent ingest data empty")
 
     # ------------------------
     # Canonical front JSON
     # ------------------------
-    front = result.get("front_matter") or {}
-    canonical = canonical_front_page(front)
-
-    if args.canonical_front_json is not None:
-        args.canonical_front_json.parent.mkdir(parents=True, exist_ok=True)
-        args.canonical_front_json.write_text(
-            json.dumps(canonical, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
-
-    if args.print_canonical_front_json:
-        sys.stdout.write(
-            json.dumps(canonical, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
-        )
-
-    # ------------------------
-    # Full parsed JSON
-    # ------------------------
-    dump_kwargs = (
-        {"ensure_ascii": False, "separators": (",", ":"), "sort_keys": True}
-        if args.compact
-        else {"ensure_ascii": False, "indent": 2, "sort_keys": True}
-    )
-
-    if args.json is not None:
-        args.json.parent.mkdir(parents=True, exist_ok=True)
-        args.json.write_text(json.dumps(result, **dump_kwargs) + "\n", encoding="utf-8")
-
-    if args.print_json:
-        sys.stdout.write(json.dumps(result, **dump_kwargs) + "\n")
-
+    # front = data.front_matter
+    # canonical = front.canonical()
+    # #
+    # if args.canonical_front_json is not None:
+    #     args.canonical_front_json.parent.mkdir(parents=True, exist_ok=True)
+    #     args.canonical_front_json.write_text(
+    #         json.dumps(canonical, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+    #         encoding="utf-8",
+    #     )
+    # #
+    # if args.print_canonical_front_json:
+    #     sys.stdout.write(
+    #         json.dumps(canonical, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    #     )
+    #
+    # # ------------------------
+    # # Full parsed JSON
+    # # ------------------------
+    # dump_kwargs = (
+    #     {"ensure_ascii": False, "separators": (",", ":"), "sort_keys": True}
+    #     if args.compact
+    #     else {"ensure_ascii": False, "indent": 2, "sort_keys": True}
+    # )
+    #
+    # if args.json is not None:
+    #     args.json.parent.mkdir(parents=True, exist_ok=True)
+    #     args.json.write_text(json.dumps(result, **dump_kwargs) + "\n", encoding="utf-8")
+    #
+    # if args.print_json:
+    #     sys.stdout.write(json.dumps(result, **dump_kwargs) + "\n")
+    #
     # ------------------------
     # Optional artifact export
     # ------------------------
     manifest = None
     if args.export_artifacts:
+        print("=== Exporting artifacts ===", file=sys.stderr)
         sink = FileSystemSink(args.export_dir)
 
         spec = ExportSpec(
             export_parsed_json=True,
             export_canonical_front_json=True,
             export_body_text=bool(args.export_body_text),
-            export_sheet_pdfs=True,
-            export_sheet_pngs=False,
+            export_sheet_pdfs=bool(args.export_sheet_pdfs),
+            export_sheet_pngs=bool(args.export_sheet_pngs),
             export_figure_pngs=not bool(args.export_no_figures),
             include_large_fields=False,
         )
@@ -418,34 +447,34 @@ def main(argv: list[str] | None = None) -> int:
     # ------------------------
     # Human summary (stderr)
     # ------------------------
-    qa = result.get("qa") or {}
-    warnings = list(qa.get("warnings") or [])
-
-    print("=== Patent ingest complete ===", file=sys.stderr)
-    print(f"PDF: {args.pdf}", file=sys.stderr)
-    if args.doc_id:
-        print(f"Doc ID: {args.doc_id}", file=sys.stderr)
-
-    # Try to print boundary info if available
-    qa_info = qa.get("info") or {}
-    if "drawings_start_index" in qa_info:
-        print(
-            f"Drawings start index: {qa_info.get('drawings_start_index')}",
-            file=sys.stderr,
-        )
-    if "body_start_index" in qa_info:
-        print(f"Body start index: {qa_info.get('body_start_index')}", file=sys.stderr)
-
-    if warnings:
-        print("\nWarnings:", file=sys.stderr)
-        for w in warnings:
-            print(f"  - {w}", file=sys.stderr)
-
-    if manifest is not None:
-        print(f"\nArtifacts exported to: {args.export_dir}", file=sys.stderr)
-        print("Manifest: manifest.json", file=sys.stderr)
-
-    if args.strict and warnings:
-        return 1
-
+    # qa = result.get("qa") or {}
+    # warnings = list(qa.get("warnings") or [])
+    #
+    # print("=== Patent ingest complete ===", file=sys.stderr)
+    # print(f"PDF: {args.pdf}", file=sys.stderr)
+    # if args.doc_id:
+    #     print(f"Doc ID: {args.doc_id}", file=sys.stderr)
+    #
+    # # Try to print boundary info if available
+    # qa_info = qa.get("info") or {}
+    # if "drawings_start_index" in qa_info:
+    #     print(
+    #         f"Drawings start index: {qa_info.get('drawings_start_index')}",
+    #         file=sys.stderr,
+    #     )
+    # if "body_start_index" in qa_info:
+    #     print(f"Body start index: {qa_info.get('body_start_index')}", file=sys.stderr)
+    #
+    # if warnings:
+    #     print("\nWarnings:", file=sys.stderr)
+    #     for w in warnings:
+    #         print(f"  - {w}", file=sys.stderr)
+    #
+    # if manifest is not None:
+    #     print(f"\nArtifacts exported to: {args.export_dir}", file=sys.stderr)
+    #     print("Manifest: manifest.json", file=sys.stderr)
+    #
+    # if args.strict and warnings:
+    #     return 1
+    #
     return 0

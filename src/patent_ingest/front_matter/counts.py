@@ -10,6 +10,7 @@ from patent_ingest.model.mapping import (
     global_range_to_where,
 )
 from patent_ingest.parsed import ParsedNorm, ParsedRaw, EntityKind
+from patent_ingest.diagnostics import Diagnostics
 
 
 @dataclass(frozen=True)
@@ -26,37 +27,59 @@ REPORTED_COUNTS_PAT = re.compile(
 
 def extract_reported_counts(
     doc: MultiPage,
+    diag: Diagnostics,
     *,
     sep: str = "\n",
     order: tuple[Column, Column] = (Column.LEFT, Column.RIGHT),
 ) -> Optional[ParsedNorm[ReportedCounts]]:
     """
-    New-model equivalent of extract_reported_counts(front_text).
+    Same behavior as your original extract_reported_counts(), but with Diagnostics added.
 
     Returns ParsedNorm[ReportedCounts] with:
       - value: ReportedCounts(claims, drawing_sheets)
       - raw_text: matched source snippet
       - where: provenance span(s) for the snippet
+
+    Diagnostics:
+      - WARN when counts line missing
+      - ERROR when regex matched but integers cannot be parsed (should be rare)
     """
+    field = "reported_counts"
+
     linear_text, segments = linearize(doc, sep=sep, order=order)
     m = REPORTED_COUNTS_PAT.search(linear_text or "")
     if not m:
+        diag.warn(
+            "reported_counts.missing",
+            "No reported counts line found (Claims, Drawing Sheets).",
+            field=field,
+        )
         return None
 
     g_start, g_end = m.span(0)
-    # Keep the snippet exact (don’t trim inside it; but trimming outer whitespace is fine)
+    # Keep the snippet exact (trim outer whitespace only)
     t_start, t_end = trim_global_range(linear_text, g_start, g_end)
 
     snippet = linear_text[t_start:t_end]
     where = global_range_to_where(t_start, t_end, segments)
 
-    counts = ReportedCounts(
-        reported_claim_count=int(m.group(1)),
-        reported_drawing_sheet_count=int(m.group(2)),
-    )
+    try:
+        counts = ReportedCounts(
+            reported_claim_count=int(m.group(1)),
+            reported_drawing_sheet_count=int(m.group(2)),
+        )
+    except Exception:
+        diag.error(
+            "reported_counts.parse_failed",
+            "Reported counts matched but failed to parse integer groups.",
+            field=field,
+            where=where,
+            raw=m.group(0),
+        )
+        return None
 
     raw = ParsedRaw[str](
-        kind=EntityKind.UNKNOWN,  # or introduce EntityKind.REPORTED_COUNTS if you want
+        kind=EntityKind.UNKNOWN,  # or EntityKind.REPORTED_COUNTS
         where=where,
         text=snippet,
         confidence=0.6,
@@ -68,7 +91,6 @@ def extract_reported_counts(
         },
     )
 
-    # Normalize into a typed value object
     return raw.normalize_to(
         value=counts,
         kind=EntityKind.UNKNOWN,  # or EntityKind.REPORTED_COUNTS

@@ -1,6 +1,6 @@
 from datetime import datetime
 import re
-from typing import Any, Optional
+from typing import Optional
 
 from patent_ingest.model.document import MultiPage
 from patent_ingest.model.span import Column
@@ -10,6 +10,7 @@ from patent_ingest.front_matter.util import (
     normalize_punctuation_spacing,
     _linear_find_group1_as_raw,
 )
+from patent_ingest.diagnostics import Diagnostics
 
 # =============================================================================
 # Dates
@@ -78,54 +79,32 @@ def _strip_leading_label(s: str, labels: list[str]) -> str:
 def extract_grant_date(
     doc: MultiPage,
     inid_blocks: dict[INIDKind, ParsedRaw[str]],
+    diag: Diagnostics,
     *,
     sep: str = "\n",
     order: tuple[Column, Column] = (Column.RIGHT, Column.LEFT),
-) -> ParsedNorm[str]:
-    """
-    New-model equivalent of your old extract_grant_date().
+) -> Optional[ParsedNorm[str]]:
+    field = "grant_date"
 
-    Returns ParsedNorm[str]:
-      - kind: EntityKind.DATE (or keep as INID(45) if you prefer)
-      - raw_text: cleaned human date (e.g., "Jan. 2, 2020")
-      - value: same as raw_text (string); ISO is stored in meta["iso"]
-      - where: Where into the original doc (Span or MultiSpan)
-    Raises TypeError if nothing found (same behavior as your previous code).
-    """
-    rejections: list[dict[str, Any]] = []
-
-    # --------
-    # 1) INID (45)
-    # --------
-    inid45 = inid_blocks.get(INIDKind._45) if hasattr(INIDKind, "_45") else None
+    inid45 = inid_blocks.get(INIDKind._45)
     if inid45 and (inid45.text or "").strip():
         clean = (
             _strip_leading_label(
-                inid45.text,
-                ["Date of Patent", "Date of Patent:", "Date of Patent :"],
+                inid45.text, ["Date of Patent", "Date of Patent:", "Date of Patent :"]
             ).strip()
             or None
         )
-
         iso = parse_uspto_date_to_iso(clean) if clean else None
         if iso:
-            # retag to a semantic entity
-            as_date = inid45.retag(
-                EntityKind.DATE,
-                rule="grant-date:from-inid45",
-                source="inid",
-                inid_code="45",
-            )
-            # keep cleaned text as the "raw_text" provenance used for normalization
-            as_date_clean = ParsedRaw[str](
-                kind=as_date.kind,
-                where=as_date.where,
+            raw = ParsedRaw[str](
+                kind=EntityKind.DATE,
+                where=inid45.where,
                 text=clean,
-                confidence=as_date.confidence,
-                meta={**as_date.meta, "rejections": rejections},
+                confidence=inid45.confidence,
+                meta={**inid45.meta, "source": "inid", "inid_code": "45"},
             )
-            return as_date_clean.normalize_to(
-                value=iso,  # human-readable value
+            return raw.normalize_to(
+                value=iso,
                 kind=EntityKind.DATE,
                 system="USPTO",
                 rule="grant-date:inid45",
@@ -133,18 +112,15 @@ def extract_grant_date(
                 normalized=True,
             )
 
-        rejections.append(
-            {
-                "source": "inid",
-                "inid_code": "45",
-                "reason": "parse_uspto_date_to_iso failed",
-                "sample": inid45.excerpt(120),
-            }
+        diag.warn(
+            "grant_date.inid_parse_failed",
+            "INID(45) present but date parsing failed; attempting fallback.",
+            field=field,
+            where=inid45.where,
+            raw=(inid45.text or "")[:160],
+            inid="45",
         )
 
-    # --------
-    # 2) Fallback: explicit "Date of Patent:" label
-    # --------
     fb1 = _linear_find_group1_as_raw(
         doc,
         DATE_OF_PATENT_FALLBACK_PAT,
@@ -152,7 +128,7 @@ def extract_grant_date(
         sep=sep,
         order=order,
         confidence=0.35,
-        meta={"rule": "grant-date:fallback Date of Patent:", "rejections": rejections},
+        meta={"rule": "grant-date:fallback Date of Patent:"},
     )
     if fb1 and (fb1.text or "").strip():
         clean = fb1.text.strip()
@@ -166,17 +142,14 @@ def extract_grant_date(
                 iso=iso,
                 normalized=True,
             )
-        rejections.append(
-            {
-                "source": "fallback",
-                "reason": "label match found but ISO parse failed",
-                "sample": fb1.excerpt(120),
-            }
+        diag.warn(
+            "grant_date.fallback_label_parse_failed",
+            "Found 'Date of Patent:' but the date did not parse; attempting generic date fallback.",
+            field=field,
+            where=fb1.where,
+            raw=(fb1.text or "")[:160],
         )
 
-    # --------
-    # 3) Fallback: first generic date in the doc front text
-    # --------
     fb2 = _linear_find_group1_as_raw(
         doc,
         DATE_GENERIC_PAT,
@@ -184,26 +157,35 @@ def extract_grant_date(
         sep=sep,
         order=order,
         confidence=0.2,
-        meta={
-            "rule": "grant-date:fallback-first-generic-date",
-            "rejections": rejections,
-        },
+        meta={"rule": "grant-date:fallback-first-generic-date"},
     )
     if fb2 and (fb2.text or "").strip():
         clean = fb2.text.strip()
         iso = parse_uspto_date_to_iso(clean) if clean else None
-        # In your old logic, you returned even if iso is None. We’ll keep that behavior,
-        # but mark normalized=False when iso missing.
-        return fb2.normalize_to(
-            value=iso,
-            kind=EntityKind.DATE,
-            system="USPTO",
-            rule="grant-date:fallback-generic",
-            iso=iso,
-            normalized=bool(iso),
+        if iso:
+            return fb2.normalize_to(
+                value=iso,
+                kind=EntityKind.DATE,
+                system="USPTO",
+                rule="grant-date:fallback-generic",
+                iso=iso,
+                normalized=True,
+            )
+        diag.error(
+            "grant_date.generic_parse_failed",
+            "Found a date-like string but parsing failed.",
+            field=field,
+            where=fb2.where,
+            raw=(fb2.text or "")[:160],
         )
+        return None
 
-    raise TypeError("No grant date found")
+    diag.error(
+        "grant_date.missing",
+        "No grant date found in INID(45) or fallback.",
+        field=field,
+    )
+    return None
 
 
 FILED_FALLBACK_PAT = re.compile(
@@ -215,44 +197,26 @@ FILED_FALLBACK_PAT = re.compile(
 def extract_filed_date(
     doc: MultiPage,
     inid_blocks: dict[INIDKind, ParsedRaw[str]],
+    diag: Diagnostics,
     *,
     sep: str = "\n",
     order: tuple[Column, Column] = (Column.LEFT, Column.RIGHT),
 ) -> Optional[ParsedNorm[str]]:
-    """
-    New-model equivalent of extract_filed_date().
+    field = "filed_date"
 
-    Priority:
-      1) INID (22) if present and parseable
-      2) Fallback: explicit "Filed:" label in front text
-
-    Returns ParsedNorm[str] or None if nothing found.
-    """
-    rejections: list[dict[str, Any]] = []
-
-    # ----------------
-    # 1) INID (22)
-    # ----------------
-    inid22 = inid_blocks.get(INIDKind._22) if hasattr(INIDKind, "_22") else None
+    inid22 = inid_blocks.get(INIDKind._22)
     if inid22 and (inid22.text or "").strip():
         clean = _strip_leading_label(inid22.text, ["Filed"]).strip() or None
         iso = parse_uspto_date_to_iso(clean) if clean else None
-
         if iso:
-            as_date = inid22.retag(
-                EntityKind.DATE,
-                rule="filed-date:from-inid22",
-                source="inid",
-                inid_code="22",
-            )
-            cleaned = ParsedRaw[str](
-                kind=as_date.kind,
-                where=as_date.where,
+            raw = ParsedRaw[str](
+                kind=EntityKind.DATE,
+                where=inid22.where,
                 text=clean,
-                confidence=as_date.confidence,
-                meta={**as_date.meta, "rejections": rejections},
+                confidence=inid22.confidence,
+                meta={**inid22.meta, "source": "inid", "inid_code": "22"},
             )
-            return cleaned.normalize_to(
+            return raw.normalize_to(
                 value=iso,
                 kind=EntityKind.DATE,
                 system="USPTO",
@@ -261,18 +225,15 @@ def extract_filed_date(
                 normalized=True,
             )
 
-        rejections.append(
-            {
-                "source": "inid",
-                "inid_code": "22",
-                "reason": "parse_uspto_date_to_iso failed",
-                "sample": inid22.excerpt(120),
-            }
+        diag.warn(
+            "filed_date.inid_parse_failed",
+            "INID(22) present but date parsing failed; attempting fallback.",
+            field=field,
+            where=inid22.where,
+            raw=(inid22.text or "")[:160],
+            inid="22",
         )
 
-    # ----------------
-    # 2) Fallback: "Filed:" label
-    # ----------------
     fb = _linear_find_group1_as_raw(
         doc,
         FILED_FALLBACK_PAT,
@@ -280,20 +241,33 @@ def extract_filed_date(
         sep=sep,
         order=order,
         confidence=0.35,
-        meta={"rule": "filed-date:fallback Filed:", "rejections": rejections},
+        meta={"rule": "filed-date:fallback Filed:"},
     )
+    if fb and (fb.text or "").strip():
+        clean = fb.text.strip()
+        iso = parse_uspto_date_to_iso(clean) if clean else None
+        if iso:
+            return fb.normalize_to(
+                value=iso,
+                kind=EntityKind.DATE,
+                system="USPTO",
+                rule="filed-date:fallback",
+                iso=iso,
+                normalized=True,
+            )
 
-    if not fb or not (fb.text or "").strip():
+        diag.error(
+            "filed_date.fallback_parse_failed",
+            "Fallback matched a date-like string but parsing still failed.",
+            field=field,
+            where=fb.where,
+            raw=(fb.text or "")[:160],
+        )
         return None
 
-    clean = fb.text.strip()
-    iso = parse_uspto_date_to_iso(clean) if clean else None
-
-    return fb.normalize_to(
-        value=iso,
-        kind=EntityKind.DATE,
-        system="USPTO",
-        rule="filed-date:fallback",
-        iso=iso,
-        normalized=bool(iso),
+    diag.error(
+        "filed_date.missing",
+        "No filed/submitted date found in INID(22) or fallback.",
+        field=field,
     )
+    return None
