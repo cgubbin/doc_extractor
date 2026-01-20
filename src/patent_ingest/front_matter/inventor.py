@@ -16,9 +16,10 @@ from patent_ingest.parsed import (
     ParsedNorm,
     kind_display,
 )
-from patent_ingest.front_matter.util import (
+from patent_ingest.common import (
     normalize_whitespace_basic,
     normalize_punctuation_spacing,
+    strip_leading_label_with_idx,
 )
 from patent_ingest.diagnostics import Diagnostics
 
@@ -124,22 +125,12 @@ def parse_inventor_chunks(raw_inventors_text: str) -> list[tuple[str, Inventor]]
     return out
 
 
-def _strip_leading_label(s: str, labels: list[str]) -> str:
-    if not s:
-        return s
-    ss = s.lstrip()
-    for lab in labels:
-        if ss.lower().startswith(lab.lower()):
-            cut = ss[len(lab) :]
-            return cut.lstrip(" :\t\r\n-")
-    return s
-
-
 INID_ANY_MARKER_PAT = re.compile(r"\(\s*\d{2}\s*\)")
 
 
 def _clean_inventors_text(raw: str) -> str:
-    raw = _strip_leading_label(raw or "", ["Inventors", "Inventor"]).strip()
+    raw, _ = strip_leading_label_with_idx(raw or "", ["Inventors", "Inventor"])
+    raw = raw.strip()
 
     # NEW: stop at the next INID marker (73, 21, 22, 65, 51, 10, 45, etc.)
     m_inid = INID_ANY_MARKER_PAT.search(raw)

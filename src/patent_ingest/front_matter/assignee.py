@@ -3,8 +3,13 @@ from typing import Any, Sequence, Optional
 
 from patent_ingest.model.span import Span, Where, Position
 from patent_ingest.parsed import ParsedRaw, INIDKind, EntityKind, ParsedNorm
-from patent_ingest.front_matter.util import normalize_punctuation_spacing
 from patent_ingest.diagnostics import Diagnostics
+from patent_ingest.common import (
+    normalize_punctuation_spacing,
+    cut_at_earliest_with_idx,
+    strip_leading_label_with_idx,
+    refine_where_by_slice,
+)
 
 ASSIGNEE_HEADING_STOP_PAT = re.compile(
     r"\b("
@@ -36,69 +41,6 @@ ASSIGNEE_CONTINUED_PAT = re.compile(r"\bContinued\b|\(\s*Continued\s*\)", re.IGN
 COUNTRY_TAG_PAT = re.compile(r"\(\s*[A-Z]{2}\s*\)\s*$")  # (US) at end
 
 
-def _cut_at_earliest_with_idx(
-    s: str, patterns: Sequence[re.Pattern[str]]
-) -> tuple[str, int]:
-    """
-    Returns (cut_text, end_index_in_original_s).
-    If no stop matches, end_index = len(s).
-    """
-    if not s:
-        return s, 0
-    stops: list[int] = []
-    for pat in patterns:
-        m = pat.search(s)
-        if m:
-            stops.append(m.start())
-    if not stops:
-        return s.strip(), len(s)
-    end = min(stops)
-    return s[:end].strip(), end
-
-
-def _strip_leading_label_with_idx(s: str, labels: list[str]) -> tuple[str, int]:
-    """
-    Strip a leading label and return (new_string, start_index_in_original).
-    """
-    if not s:
-        return s, 0
-
-    lead_ws = len(s) - len(s.lstrip())
-    ss = s.lstrip()
-
-    for lab in labels:
-        if ss.lower().startswith(lab.lower()):
-            cut = ss[len(lab) :]
-            cut2 = cut.lstrip(" :\t\r\n")
-            start_idx = lead_ws + len(lab) + (len(cut) - len(cut2))
-            return cut2, start_idx
-
-    return s, 0
-
-
-def _refine_where_by_slice(
-    raw: ParsedRaw[str], start_idx: int, end_idx: int
-) -> tuple[Where, dict[str, Any]]:
-    """
-    Refine where for substring raw.text[start_idx:end_idx] if where is Span.
-    If MultiSpan, keep it and record indices.
-    """
-    meta: dict[str, Any] = {"refine": {"start_idx": start_idx, "end_idx": end_idx}}
-
-    if isinstance(raw.where, Span):
-        new_start = Position(
-            raw.where.start.page,
-            raw.where.start.column,
-            raw.where.start.offset + start_idx,
-        )
-        new_end = Position(
-            raw.where.end.page, raw.where.end.column, raw.where.start.offset + end_idx
-        )
-        return Span(new_start, new_end), meta
-
-    return raw.where, meta
-
-
 def _clean_assignee_from_inid(raw: ParsedRaw[str]) -> ParsedRaw[str]:
     """
     Apply your old cleaning rules, attempting span refinement when possible.
@@ -107,7 +49,7 @@ def _clean_assignee_from_inid(raw: ParsedRaw[str]) -> ParsedRaw[str]:
     s = original
 
     # 0) strip leading label
-    s1, strip_idx = _strip_leading_label_with_idx(
+    s1, strip_idx = strip_leading_label_with_idx(
         s, ["Assignee", "Assignees", "Assignee:"]
     )
 
@@ -119,7 +61,7 @@ def _clean_assignee_from_inid(raw: ParsedRaw[str]) -> ParsedRaw[str]:
         s1n = " ".join(s1.split()).strip()
 
     # 1) cut at headings/refs/boilerplate
-    s2, cut_end_rel = _cut_at_earliest_with_idx(
+    s2, cut_end_rel = cut_at_earliest_with_idx(
         s1n,
         [
             ASSIGNEE_HEADING_STOP_PAT,
@@ -151,7 +93,7 @@ def _clean_assignee_from_inid(raw: ParsedRaw[str]) -> ParsedRaw[str]:
     # We'll keep it conservative: refine start at strip_idx, end at strip_idx + cut_end_rel, and record post-ops.
     end_idx = strip_idx + cut_end_rel
 
-    where2, refine_meta = _refine_where_by_slice(
+    where2, refine_meta = refine_where_by_slice(
         raw, start_idx=strip_idx, end_idx=end_idx
     )
 

@@ -5,11 +5,12 @@ from typing import Optional
 from patent_ingest.model.document import MultiPage
 from patent_ingest.model.span import Column
 from patent_ingest.parsed import ParsedRaw, ParsedNorm, INIDKind, EntityKind
-from patent_ingest.front_matter.util import (
+from patent_ingest.common import (
     normalize_whitespace_basic,
     normalize_punctuation_spacing,
-    _linear_find_group1_as_raw,
+    strip_leading_label_with_idx,
 )
+from patent_ingest.front_matter.util import _linear_find_group1_as_raw
 from patent_ingest.diagnostics import Diagnostics
 
 # =============================================================================
@@ -65,17 +66,6 @@ DATE_OF_PATENT_FALLBACK_PAT = re.compile(
 DATE_GENERIC_PAT = re.compile(r"\b([A-Za-z\.]+\s+\d{1,2},\s+\d{4})\b")
 
 
-def _strip_leading_label(s: str, labels: list[str]) -> str:
-    if not s:
-        return s
-    ss = s.lstrip()
-    for lab in labels:
-        if ss.lower().startswith(lab.lower()):
-            cut = ss[len(lab) :]
-            return cut.lstrip(" :\t\r\n")
-    return s
-
-
 def extract_grant_date(
     doc: MultiPage,
     inid_blocks: dict[INIDKind, ParsedRaw[str]],
@@ -88,12 +78,10 @@ def extract_grant_date(
 
     inid45 = inid_blocks.get(INIDKind._45)
     if inid45 and (inid45.text or "").strip():
-        clean = (
-            _strip_leading_label(
-                inid45.text, ["Date of Patent", "Date of Patent:", "Date of Patent :"]
-            ).strip()
-            or None
+        clean, _ = strip_leading_label_with_idx(
+            inid45.text, ["Date of Patent", "Date of Patent:", "Date of Patent :"]
         )
+        clean = clean.strip() or None
         iso = parse_uspto_date_to_iso(clean) if clean else None
         if iso:
             raw = ParsedRaw[str](
@@ -206,7 +194,8 @@ def extract_filed_date(
 
     inid22 = inid_blocks.get(INIDKind._22)
     if inid22 and (inid22.text or "").strip():
-        clean = _strip_leading_label(inid22.text, ["Filed"]).strip() or None
+        clean, _ = strip_leading_label_with_idx(inid22.text, ["Filed"])
+        clean = clean.strip() or None
         iso = parse_uspto_date_to_iso(clean) if clean else None
         if iso:
             raw = ParsedRaw[str](

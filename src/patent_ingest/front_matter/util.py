@@ -7,6 +7,16 @@ from patent_ingest.model.mapping import (
 from patent_ingest.model.document import MultiPage
 from patent_ingest.parsed import Kind, ParsedRaw
 
+# Re-export from common for backwards compatibility
+from patent_ingest.common import (
+    normalize_whitespace,
+    normalize_whitespace_basic,
+    normalize_punctuation_spacing,
+    normalize_text_field,
+    dehyphenate,
+    strip_front_page_noise,
+)
+
 import re
 from typing import Optional, Any
 
@@ -59,91 +69,6 @@ def find_first_in_region(
         confidence=confidence,
         meta=out_meta,
     )
-
-
-# =============================================================================
-# Cleaning helpers (front page)
-# =============================================================================
-
-# On the front page, we intentionally do NOT strip the "US 7,629,993 B2" line.
-_FRONT_STRIP_PATTERNS = [
-    re.compile(r"^\s*\d+\s*$", re.MULTILINE),
-]
-
-
-def dehyphenate(text: str) -> str:
-    # Join words split by hyphen at line end: "inspec-\n tion" -> "inspection"
-    return re.sub(r"(\w)-\n(\w)", r"\1\2", text or "")
-
-
-def normalize_whitespace(text: str) -> str:
-    text = (text or "").replace("\r", "\n")
-    text = re.sub(r"[ \t]+", " ", text)
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    return text.strip()
-
-
-def strip_front_page_noise(text: str) -> str:
-    cleaned = text or ""
-    for pat in _FRONT_STRIP_PATTERNS:
-        cleaned = pat.sub("", cleaned)
-    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
-    return cleaned.strip()
-
-
-def _cut_at_heading(s: str, pat: re.Pattern) -> str:
-    if not s:
-        return s
-    m = pat.search(s)
-    return s[: m.start()].strip() if m else s.strip()
-
-
-def normalize_whitespace_basic(s: str) -> str:
-    return re.sub(r"\s+", " ", (s or "")).strip()
-
-
-def normalize_punctuation_spacing(s: str) -> str:
-    """
-    Fix common PDF-extraction spacing artifacts:
-      - "Oct . 20 , 2016" -> "Oct. 20, 2016"
-      - "Nigel P . Smith" -> "Nigel P. Smith"
-      - "Milipatis , CA" -> "Milipatis, CA"
-    Does NOT attempt spelling correction.
-    """
-    if not s:
-        return s
-    t = s
-
-    # Collapse whitespace
-    t = re.sub(r"\s+", " ", t).strip()
-
-    # Remove spaces before common punctuation
-    t = re.sub(r"\s+([,.;:)-])", r"\1", t)
-
-    # Remove spaces after brackets
-    t = re.sub(r"([(-])\s*", r"\1", t)
-
-    # Ensure a single space after punctuation when appropriate
-    # (Avoid touching decimals/abbreviations too aggressively.)
-    t = re.sub(r"([,;:])([^\s])", r"\1 \2", t)
-
-    # Fix spaced month abbreviations: "Oct .", "Sept ."
-    t = re.sub(
-        r"\b([A-Za-z]{3,4})\.\s*", lambda m: m.group(0), t
-    )  # no-op but keeps structure clear
-
-    return t
-
-
-def normalize_text_field(s: str) -> str:
-    """
-    General text field normalization: whitespace, punctuation spacing, dehyphenation.
-    """
-    t = s or ""
-    t = dehyphenate(t)
-    t = normalize_whitespace(t)
-    t = normalize_punctuation_spacing(t)
-    return t
 
 
 def normalize_us_application_no(raw: str) -> Optional[str]:

@@ -7,6 +7,10 @@ from patent_ingest.diagnostics import Diagnostics
 from patent_ingest.model.document import MultiPage
 from patent_ingest.model.span import Span, Column, Position, Where
 from patent_ingest.parsed import ParsedRaw, ParsedNorm, INIDKind, EntityKind
+from patent_ingest.common import (
+    strip_leading_label_with_idx,
+    refine_where_by_slice,
+)
 
 
 # =============================================================================
@@ -97,60 +101,6 @@ def _cut_at_heading_with_idx(s: str, stop_pat: re.Pattern[str]) -> Tuple[str, in
     return s[: m.start()], m.start()
 
 
-def _strip_leading_label_with_idx(s: str, labels: list[str]) -> Tuple[str, int]:
-    """
-    If any label appears at the beginning (ignoring leading whitespace), strip it and return
-    (stripped_text, start_index_in_original).
-    Otherwise return (s, 0).
-    """
-    if not s:
-        return s, 0
-
-    # Preserve original index by accounting for leading whitespace
-    lead_ws = len(s) - len(s.lstrip())
-    ss = s.lstrip()
-
-    for lab in labels:
-        # Flexible match: ignore spacing and punctuation differences lightly
-        if ss.lower().startswith(lab.lower()):
-            cut = ss[len(lab) :]
-            # Strip common separators after label
-            cut2 = cut.lstrip(" :\t\r\n")
-            # index where cut2 begins in original string
-            # original: [lead_ws] + label + [len(cut)-len(cut2)]
-            start_idx = lead_ws + len(lab) + (len(cut) - len(cut2))
-            return cut2, start_idx
-
-    return s, 0
-
-
-def _refine_where_by_slice(
-    raw: ParsedRaw[str], start_idx: int, end_idx: int
-) -> Tuple[Where, dict[str, Any]]:
-    """
-    Try to refine raw.where to correspond to raw.text[start_idx:end_idx].
-
-    - If raw.where is Span, return a new Span with shifted offsets.
-    - If raw.where is MultiSpan, keep it (truthful) and record indices for debugging.
-    """
-    meta: dict[str, Any] = {"refine": {"start_idx": start_idx, "end_idx": end_idx}}
-
-    if isinstance(raw.where, Span):
-        # Safe offset shift within the same page+column evidence
-        new_start = Position(
-            raw.where.start.page,
-            raw.where.start.column,
-            raw.where.start.offset + start_idx,
-        )
-        new_end = Position(
-            raw.where.end.page, raw.where.end.column, raw.where.start.offset + end_idx
-        )
-        return Span(new_start, new_end), meta
-
-    # MultiSpan: we can’t reliably map substring indices across parts without extra machinery
-    return raw.where, meta
-
-
 def _clean_application_slice(raw: ParsedRaw[str]) -> ParsedRaw[str]:
     """
     Apply:
@@ -163,7 +113,7 @@ def _clean_application_slice(raw: ParsedRaw[str]) -> ParsedRaw[str]:
     s = original
 
     # 1) strip label
-    s1, strip_idx = _strip_leading_label_with_idx(s, APPL_LABELS)
+    s1, strip_idx = strip_leading_label_with_idx(s, APPL_LABELS)
 
     # 2) cut at heading
     s2, cut_end_rel = _cut_at_heading_with_idx(s1, APPL_STOP_PAT)
@@ -188,7 +138,7 @@ def _clean_application_slice(raw: ParsedRaw[str]) -> ParsedRaw[str]:
     if not s3:
         return raw.with_text("", cleaned=True)
 
-    where2, refine_meta = _refine_where_by_slice(raw, start_idx, end_idx)
+    where2, refine_meta = refine_where_by_slice(raw, start_idx, end_idx)
     return ParsedRaw[str](
         kind=raw.kind,
         where=where2,
