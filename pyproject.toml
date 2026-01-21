@@ -10,6 +10,12 @@ dependencies = [
     "structlog>=24.1.0",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+]
+
 [build-system]
 requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
@@ -25,3 +31,49 @@ patent-ingest = "patent_ingest.__main__:main"
 
 [tool.setuptools.package-data]
 "patent_ingest" = ["schemas/*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "--verbose",
+    "--strict-markers",
+    "--strict-config",
+    # Coverage options (requires pytest-cov to be installed)
+    # "--cov=src/patent_ingest",
+    # "--cov-report=term-missing",
+    # "--cov-report=html:htmlcov",
+    # "--cov-report=json:coverage.json",
+    # "--cov-branch",
+]
+markers = [
+    "unit: Unit tests (fast, no external dependencies)",
+    "integration: Integration tests (may require test files)",
+    "slow: Slow tests (e.g., full pipeline runs)",
+]
+
+[tool.coverage.run]
+source = ["src/patent_ingest"]
+omit = [
+    "*/tests/*",
+    "*/__pycache__/*",
+    "*/test_*.py",
+]
+branch = true
+
+[tool.coverage.report]
+precision = 2
+show_missing = true
+skip_covered = false
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "@abstractmethod",
+    "@abc.abstractmethod",
+]

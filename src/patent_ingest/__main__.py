@@ -21,6 +21,9 @@ def main(argv: list[str] | None = None) -> int:
         ExportSpec,
         parse_patent,
     )
+    from patent_ingest.logging import get_logger
+
+    logger = get_logger(__name__)
 
     parser = argparse.ArgumentParser(
         prog="patent_ingest",
@@ -114,17 +117,27 @@ def main(argv: list[str] | None = None) -> int:
 
     if not args.pdf.exists():
         print(f"ERROR: PDF not found: {args.pdf}", file=sys.stderr)
+        logger.error("cli_pdf_not_found", pdf_path=str(args.pdf))
         return 2
 
     if args.export_artifacts and args.export_dir is None:
         parser.error("--export-artifacts requires --export-dir")
 
+    logger.info("cli_started", pdf_path=str(args.pdf), doc_id=args.doc_id)
+
     # ------------------------
     # Parse (pure; no exports)
     # ------------------------
     try:
+        logger.info("parsing_started", pdf_path=str(args.pdf))
         result = parse_patent(pdf_path=str(args.pdf), doc_id=args.doc_id)
+        logger.info(
+            "parsing_completed",
+            pdf_path=str(args.pdf),
+            status=result.ingested.status.value,
+        )
     except Exception as e:
+        logger.error("parsing_exception", pdf_path=str(args.pdf), error=str(e))
         raise e
 
     if result.ingested.status == IngestStatus.FAILED:
@@ -173,7 +186,8 @@ def main(argv: list[str] | None = None) -> int:
     # ------------------------
     manifest = None
     if args.export_artifacts:
-        print("=== Exporting artifacts ===", file=sys.stderr)
+        logger.info("artifact_export_started", export_dir=str(args.export_dir))
+
         sink = FileSystemSink(args.export_dir)
 
         spec = ExportSpec(
@@ -193,5 +207,11 @@ def main(argv: list[str] | None = None) -> int:
             spec=spec,
             doc_id=args.doc_id,
         )
+        logger.info(
+            "artifact_export_completed",
+            export_dir=str(args.export_dir),
+            files_written=len(manifest["artifacts"]) if manifest else 0,
+        )
 
+    logger.info("cli_completed", pdf_path=str(args.pdf))
     return 0

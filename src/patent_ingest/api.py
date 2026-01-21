@@ -14,9 +14,12 @@ from patent_ingest.pipeline import (
     ingest_patent_pdf,
     IngestionResult,
 )
+from patent_ingest.logging import get_logger
+
+logger = get_logger(__name__)
 
 
-SCHEMA_VERSION = "1.0.0"
+SCHEMA_VERSION = "1.1.0"  # Updated to v1.1 for unified bundle format
 
 
 @dataclass(frozen=True)
@@ -151,6 +154,7 @@ class ParseResult:
     schema_version: str
     doc_id: Optional[str]
     pdf_sha256: Optional[str]
+    elapsed_time_ms: float
 
 
 def parse_patent(
@@ -169,6 +173,7 @@ def parse_patent(
     """
 
     import logging
+    import time
 
     # This sets the root logger to write to stdout (your console).
     # Your script/app needs to call this somewhere at least once.
@@ -188,6 +193,16 @@ def parse_patent(
 
     options = options or ParseOptions()
 
+    # Start timing
+    start_time = time.perf_counter()
+
+    logger.info(
+        "api_parse_started",
+        pdf_path=pdf_path,
+        doc_id=doc_id,
+        has_bytes=pdf_bytes is not None,
+    )
+
     tmp_path: Optional[str] = None
     if pdf_bytes is not None:
         # Write to a temporary file to reuse the existing pipeline which expects a path.
@@ -195,6 +210,9 @@ def parse_patent(
         os.close(fd)
         Path(tmp_path).write_bytes(pdf_bytes)
         pdf_path_use = tmp_path
+        logger.debug(
+            "api_temp_file_created", tmp_path=tmp_path, size_bytes=len(pdf_bytes)
+        )
     else:
         pdf_path_use = str(pdf_path)
 
@@ -215,7 +233,20 @@ def parse_patent(
             with open(pdf_path_use, "rb") as f:
                 pdf_sha256 = _sha256(f.read())
 
-        return ParseResult(result, SCHEMA_VERSION, doc_id, pdf_sha256)
+        # Calculate elapsed time
+        end_time = time.perf_counter()
+        elapsed_time_ms = (end_time - start_time) * 1000.0
+
+        logger.info(
+            "api_parse_completed",
+            pdf_path=pdf_path,
+            doc_id=doc_id,
+            pdf_sha256=pdf_sha256[:16] + "..." if pdf_sha256 else None,
+            status=result.status.value,
+            elapsed_time_ms=round(elapsed_time_ms, 2),
+        )
+
+        return ParseResult(result, SCHEMA_VERSION, doc_id, pdf_sha256, elapsed_time_ms)
     finally:
         if tmp_path is not None:
             try:
@@ -254,6 +285,17 @@ def export_artifacts(
     )
     diag = parse_result.ingested.diagnostics
 
+    logger.info(
+        "api_export_started",
+        doc_id=doc_id,
+        export_parsed_json=spec.export_parsed_json,
+        export_canonical_front_json=spec.export_canonical_front_json,
+        export_body_text=spec.export_body_text,
+        export_sheet_pdfs=spec.export_sheet_pdfs,
+        export_sheet_pngs=spec.export_sheet_pngs,
+        export_figure_pngs=spec.export_figure_pngs,
+    )
+
     # Materialize PDF to a local path for export routines.
     tmp_pdf_path: Optional[str] = None
     if pdf_bytes is not None:
@@ -276,12 +318,14 @@ def export_artifacts(
         tmp_out = Path(td)
 
         if spec.export_canonical_front_json:
+            logger.debug("api_exporting_front_matter_json", doc_id=doc_id)
             canonical = parse_result.ingested.data.front_matter.canonical()
             loc = "front/metadata.json"
             manifest["artifacts"]["metadata"] = loc
             sink.put_json(f"{doc_id}/{loc}", canonical)
 
         if spec.export_body_text:
+            logger.debug("api_exporting_body_text", doc_id=doc_id)
             sections = parse_result.ingested.data.body.canonical_sections()
             loc = "body/sections.json"
             manifest["artifacts"]["sections"] = loc
@@ -297,7 +341,13 @@ def export_artifacts(
 
         # 2) Drawing sheets / figure exports
         if spec.export_sheet_pdfs or spec.export_sheet_pngs or spec.export_figure_pngs:
-            print("Exporting drawing sheets and figures...")
+            logger.debug(
+                "api_exporting_drawings",
+                doc_id=doc_id,
+                export_pdfs=spec.export_sheet_pdfs,
+                export_pngs=spec.export_sheet_pngs,
+                export_figures=spec.export_figure_pngs,
+            )
             # To export we need to re-run drawing_sheets.process_drawing_sheets with output_dir.
             from patent_ingest.drawing_sheets.export import export_drawing_artifacts
 
@@ -339,21 +389,31 @@ def export_artifacts(
                     manifest["artifacts"].setdefault("figure_pngs", []).append(loc)
                 else:
                     manifest["artifacts"].setdefault("other", []).append(loc)
-            from datetime import datetime
 
-            manifest["created_utc"] = datetime.today().strftime("%Y-%m-%d")
+        # Always write manifest and diagnostics (not just when exporting drawings)
+        from datetime import datetime
+        from patent_ingest.diagnostics import DiagFormat
 
-            from patent_ingest.diagnostics import DiagFormat
+        manifest["created_utc"] = datetime.today().strftime("%Y-%m-%d")
+        manifest["elapsed_time_ms"] = round(parse_result.elapsed_time_ms, 2)
+        manifest["diagnostics"] = diag.diagnostics_as(DiagFormat.JSON)
 
-            manifest["diagnostics"] = diag.diagnostics_as(DiagFormat.JSON)
-
-            key = f"{doc_id}/manifest.json"
-            sink.put_json(key, manifest)
+        key = f"{doc_id}/manifest.json"
+        sink.put_json(key, manifest)
 
     if tmp_pdf_path is not None:
         try:
             os.remove(tmp_pdf_path)
         except OSError:
             pass
+
+    logger.info(
+        "api_export_completed",
+        doc_id=doc_id,
+        total_artifacts=sum(
+            len(v) if isinstance(v, list) else 1
+            for k, v in manifest["artifacts"].items()
+        ),
+    )
 
     return manifest

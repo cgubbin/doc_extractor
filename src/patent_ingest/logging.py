@@ -34,7 +34,11 @@ _LOG_LEVEL = getattr(logging, _LOG_LEVEL_STR, logging.INFO)
 
 
 def _configure_structlog() -> None:
-    """Configure structlog with sensible defaults for library usage."""
+    """Configure structlog with sensible defaults for library usage.
+
+    This also configures standard library logging to route through structlog,
+    so messages from libraries like PIL, pymupdf, etc. will be captured.
+    """
     if _LOGGING_DISABLED:
         # Configure minimal no-op logging
         structlog.configure(
@@ -44,23 +48,44 @@ def _configure_structlog() -> None:
             logger_factory=structlog.PrintLoggerFactory(file=open(os.devnull, 'w')),
             cache_logger_on_first_use=True,
         )
+        # Also disable stdlib logging
+        logging.root.setLevel(logging.CRITICAL + 1)
         return
 
-    # Configure structured JSON logging
+    # Shared processors for both structlog and stdlib
+    shared_processors = [
+        structlog.contextvars.merge_contextvars,
+        structlog.stdlib.add_log_level,
+        structlog.processors.StackInfoRenderer(),
+        structlog.stdlib.PositionalArgumentsFormatter(),
+        structlog.processors.TimeStamper(fmt="iso", utc=True),
+        structlog.processors.UnicodeDecoder(),
+    ]
+
+    # Configure structlog
     structlog.configure(
-        processors=[
-            structlog.contextvars.merge_contextvars,
-            structlog.processors.add_log_level,
-            structlog.processors.StackInfoRenderer(),
-            structlog.dev.set_exc_info,
-            structlog.processors.TimeStamper(fmt="iso", utc=True),
-            structlog.processors.JSONRenderer(),
+        processors=shared_processors + [
+            structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
         ],
-        wrapper_class=structlog.make_filtering_bound_logger(_LOG_LEVEL),
+        wrapper_class=structlog.stdlib.BoundLogger,
         context_class=dict,
-        logger_factory=structlog.PrintLoggerFactory(file=sys.stderr),
+        logger_factory=structlog.stdlib.LoggerFactory(),
         cache_logger_on_first_use=True,
     )
+
+    # Configure standard library logging to use structlog formatting
+    formatter = structlog.stdlib.ProcessorFormatter(
+        processor=structlog.processors.JSONRenderer(),
+        foreign_pre_chain=shared_processors,
+    )
+
+    handler = logging.StreamHandler(sys.stderr)
+    handler.setFormatter(formatter)
+    handler.setLevel(_LOG_LEVEL)
+
+    root_logger = logging.getLogger()
+    root_logger.addHandler(handler)
+    root_logger.setLevel(_LOG_LEVEL)
 
 
 # Configure on module import
@@ -89,10 +114,11 @@ def set_log_level(level: str) -> None:
     Args:
         level: Log level string (DEBUG, INFO, WARNING, ERROR, CRITICAL)
     """
+    global _LOG_LEVEL
     if _LOGGING_DISABLED:
         return
 
-    log_level = getattr(logging, level.upper(), logging.INFO)
+    _LOG_LEVEL = getattr(logging, level.upper(), logging.INFO)
     _configure_structlog()
 
 

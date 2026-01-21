@@ -68,7 +68,8 @@ class PatentBodyData:
             if k in {"background", "summary", "detailed_description"}
         }
 
-    def canonical_claims(self) -> list[str, ...]:
+    def canonical_claims(self) -> list[dict]:
+        """Return claims in v1.1 format compatible with bundle_v1_1.ClaimV1_1."""
         return [
             {
                 "number": c.number,
@@ -79,8 +80,9 @@ class PatentBodyData:
             for c in self.claims.items
         ]
 
-    def canonical_figures(self) -> Tuple[str, ...]:
-        return self.figures.items
+    def canonical_figures(self) -> list[dict]:
+        """Return figure descriptions in v1.1 format compatible with bundle_v1_1.FigureDescriptionV1_1."""
+        return list(self.figures.items)
 
 
 @dataclass(frozen=True)

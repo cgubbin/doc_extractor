@@ -4,6 +4,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import difflib
 from typing import Optional, Literal
+import re
 
 
 @dataclass
@@ -25,6 +26,7 @@ class ClaimAlignment:
 class ClaimsDiffResult:
     alignments: list[ClaimAlignment]
     summary: dict
+    warnings: list[WarningItem] = field(default_factory=list)
 
 
 @dataclass
@@ -34,12 +36,21 @@ class AlignmentPair:
     score: float
 
 
-@dataclass
+@dataclass(frozen=True)
 class Claim:
     number: int
     text: str
     depends_on: list[int] = field(default_factory=list)
     is_independent: bool = True
+
+    @classmethod
+    def from_dict(cls, d: dict) -> Claim:
+        return cls(
+            number=d.get("number", 0),
+            text=d.get("text", ""),
+            depends_on=d.get("depends_on", []),
+            is_independent=d.get("is_independent", True),
+        )
 
 
 def align_claims(submitted: list[Claim], approved: list[Claim], match_threshold: float):
@@ -196,3 +207,114 @@ def _word_diff(a: str, b: str) -> dict:
         "replacements": [x for x in replaces if x["from"].strip() or x["to"].strip()],
         "unified": unified,
     }
+
+
+@dataclass
+class RelevantExcerpt:
+    source: Literal["submitted", "approved"]
+    section: str
+    start: int
+    end: int
+    text: str
+    reason: str
+    score: float
+
+
+def extract_relevant_excerpts(
+    normalized_text: str,
+    claims_diff: ClaimsDiffResult,
+    source_label: str,
+    window_chars: int,
+    max_per_section: int,
+):
+    excerpts: list[RelevantExcerpt] = []
+
+    # Include changed claim diffs directly
+    for al in claims_diff.alignments:
+        if al.status in ("added", "removed", "modified"):
+            if source_label == "submitted" and al.submitted_no is None:
+                continue
+            if source_label == "approved" and al.approved_no is None:
+                continue
+            excerpts.append(
+                RelevantExcerpt(
+                    source=source_label,
+                    section="claims",
+                    start=-1,
+                    end=-1,
+                    text=_claim_text_from_alignment(al),
+                    reason=f"claim_{al.status}",
+                    score=10.0,
+                )
+            )
+
+    anchors = _extract_anchors(claims_diff)
+    if not anchors:
+        return _dedupe(excerpts)[:max_per_section]
+
+    for phrase in anchors:
+        for m in re.finditer(re.escape(phrase), normalized_text, flags=re.IGNORECASE):
+            s = max(0, m.start() - window_chars)
+            e = min(len(normalized_text), m.end() + window_chars)
+            chunk = normalized_text[s:e].strip()
+            if chunk:
+                excerpts.append(
+                    RelevantExcerpt(
+                        source=source_label,
+                        section="fulltext",
+                        start=s,
+                        end=e,
+                        text=chunk,
+                        reason="changed_term_hit",
+                        score=5.0,
+                    )
+                )
+
+    return _dedupe(excerpts)[: (max_per_section * 2)]
+
+
+def _extract_anchors(claims_diff: ClaimsDiffResult) -> list[str]:
+    phrases: set[str] = set()
+    for al in claims_diff.alignments:
+        if al.status not in ("modified", "added"):
+            continue
+        d = al.diff or {}
+        for ins in d.get("insertions", []):
+            p = _good_anchor(ins)
+            if p:
+                phrases.add(p)
+        for rep in d.get("replacements", []):
+            p = _good_anchor(rep.get("to", ""))
+            if p:
+                phrases.add(p)
+    out = sorted(phrases, key=len, reverse=True)
+    return out[:30]
+
+
+def _good_anchor(s: str) -> str | None:
+    s = " ".join(s.split()).strip(" ,;:.")
+    if len(s) < 12:
+        return None
+    if len(s) > 80:
+        s = s[:80].rsplit(" ", 1)[0]
+    return s or None
+
+
+def _claim_text_from_alignment(al) -> str:
+    if al.status == "added":
+        return al.diff.get("added_full", "")
+    if al.status == "removed":
+        return al.diff.get("deleted_full", "")
+    return al.diff.get("unified", "")
+
+
+def _dedupe(excerpts):
+    seen = set()
+    out = []
+    for ex in excerpts:
+        key = (ex.section, ex.start, ex.end, ex.reason, ex.text[:120])
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(ex)
+    return out

@@ -1,7 +1,13 @@
 .git
+.DS_Store
 src/__pycache__/
 src/data/
 .direnv/
 .venv/
 out/
-
+build/
+tests/unit/__pycache__/
+tests/integration/__pycache__/
+tests/__pycache__/
+src/patent_ingest.egg-info
+src/patent_ingest/__pycache__/

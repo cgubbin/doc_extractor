@@ -1,7 +1,0 @@
-README.md
-pyproject.toml
-patent_ingest/patent_ingest.egg-info/PKG-INFO
-patent_ingest/patent_ingest.egg-info/SOURCES.txt
-patent_ingest/patent_ingest.egg-info/dependency_links.txt
-patent_ingest/patent_ingest.egg-info/requires.txt
-patent_ingest/patent_ingest.egg-info/top_level.txt

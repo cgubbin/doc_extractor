@@ -1,30 +1,31 @@
 {
-    "patent_number_normalized": "US7629993B2",
-    "title": "AUTOMATED WAFER DEFECT INSPECTION SYSTEM USING BACKSIDE ILLUMINATION",
-    "assignee": "Rudolph Technologies, Inc., Flanders, NJ",
-    "inventors": [
-        "Mark Harless, Plymouth, MN",
-        "Jeremy Jenum, Plymouth, MN",
-        "Willard Charles Raymond, Plymouth, MN"
-    ],
-    "application_no": "10/262,173",
-    "filed_iso": "2002-09-30",
-    "grant_iso": "2009-12-08",
-    "reported_claim_count": 16,
-    "reported_drawing_sheet_count": 4,
-    "cited_us_patents_digits": [
-        "3963354",
-        "4148065",
-        "4209257",
-        "4527070",
-        "5095204",
-        "5539514",
-        "5737072",
-        "5892579",
-        "6084716",
-        "6324298",
-        "6779386"
-    ],
-    "cited_us_publications": [],
-    "num_sheets": 1
+  "abstract": "A defect inspection system for the semiconductor and micro electronics industry. More particularly, the present invention relates to an automated defect inspection system for wafers or other semiconductor or electronic Substrates of any kind or type that are transparent, translucent, opaque or otherwise capable of allowing at least Some light to pass through.",
+  "application_number": "10/262,173",
+  "assignee": "Rudolph Technologies, Inc., Flanders, NJ",
+  "cited_us_patents": [
+    "3963354",
+    "4148065",
+    "4209257",
+    "4527070",
+    "5095204",
+    "5539514",
+    "5737072",
+    "5892579",
+    "6084716",
+    "6324298",
+    "6779386"
+  ],
+  "cited_us_publications": [],
+  "filed_date": "2002-09-30",
+  "grant_date": "2009-12-08",
+  "inventors": [
+    "Mark Harless, Plymouth, MN",
+    "Jeremy Jenum, Plymouth, MN",
+    "Willard Charles Raymond, Plymouth, MN"
+  ],
+  "num_sheets": 1,
+  "patent_number_normalized": "US7629993B2",
+  "reported_claim_count": 16,
+  "reported_drawing_sheet_count": 4,
+  "title": "AUTOMATED WAFER DEFECT INSPECTION SYSTEMUSING BACKSIDE LLUMINATION"
 }

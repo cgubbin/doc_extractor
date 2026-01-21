@@ -1,8 +1,25 @@
+"""Pytest configuration and fixtures for unit tests."""
+
 import pytest
 
 from patent_ingest.model.document import MultiPage
 from patent_ingest.model.span import Column, Span, Where
 from patent_ingest.diagnostics import Diagnostics
+
+# Import helper functions to make them easily available in tests
+from test_helpers import (
+    assert_no_errors,
+    assert_no_warnings,
+    assert_no_diagnostics,
+    assert_has_error,
+    assert_has_warning,
+    get_diag_codes,
+    normalize_whitespace,
+    assert_text_equals,
+    assert_text_contains,
+    assert_lists_equal,
+    assert_field_value,
+)
 
 
 @pytest.fixture

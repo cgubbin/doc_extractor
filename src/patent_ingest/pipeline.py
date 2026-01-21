@@ -37,6 +37,9 @@ from patent_ingest.body.parse import parse_patent_body_fallible, PatentBodyData
 from patent_ingest.drawing_sheets.model import parse_drawing_sheets, DrawingSheetsData
 from patent_ingest.model.document import read_pdf_to_multipage
 from patent_ingest.diagnostics import Diagnostics
+from patent_ingest.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 @dataclass(frozen=True)
@@ -133,26 +136,40 @@ def ingest_patent_pdf(
       }
     """
     diag = Diagnostics()
+
+    logger.info("ingestion_started", pdf_path=str(path))
+
     try:
         doc = read_pdf_to_multipage(path)
+        logger.info("pdf_loaded", pdf_path=str(path), page_count=len(doc))
     except Exception as e:
         diag.error(
             "pdf.read_failure",
             f"Failed to read PDF at {path}: {e}",
             exception=e,
         )
+        logger.error("pdf_load_failed", pdf_path=str(path), error=str(e))
         return IngestionResult(
             status=IngestStatus.FAILED, data=None, diagnostics=diag, meta={"path": path}
         )
+
+    logger.info("front_matter_parsing_started")
 
     try:
         result = parse_front_matter(doc)  # returns FrontMatterResult(data, diagnostics)
         diag.merge(result.diagnostics)
         front_matter_data = result.data
+        logger.info(
+            "front_matter_parsing_completed",
+            pages_scanned=front_matter_data.num_sheets,
+            errors=len(result.diagnostics.errors),
+            warnings=len(result.diagnostics.warnings),
+        )
     except Exception as e:
         diag.error(
             "parse.exception", f"Unhandled exception during parsing: {e}", field="parse"
         )
+        logger.error("front_matter_parsing_failed", error=str(e))
         return IngestionResult(
             status=IngestStatus.FAILED, data=None, diagnostics=diag, meta={"path": path}
         )
@@ -167,6 +184,12 @@ def ingest_patent_pdf(
         pages=range(num_front_pages + num_drawing_pages, total_pages)
     )
 
+    logger.info(
+        "drawing_sheets_parsing_started",
+        expected_pages=num_drawing_pages,
+        page_range=f"{num_front_pages}-{num_front_pages + num_drawing_pages - 1}",
+    )
+
     try:
         pages = [
             ii for ii in range(num_front_pages, num_front_pages + num_drawing_pages)
@@ -174,22 +197,40 @@ def ingest_patent_pdf(
         result = parse_drawing_sheets(path, pages, diag)  # returns DrawingSheetsResult
         diag.merge(result.diagnostics)
         drawing_sheets_data = result.data
+        logger.info(
+            "drawing_sheets_parsing_completed",
+            sheets_parsed=drawing_sheets_data.num_sheets,
+            errors=len(result.diagnostics.errors),
+            warnings=len(result.diagnostics.warnings),
+        )
     except Exception as e:
         diag.error(
             "parse.exception", f"Unhandled exception during parsing: {e}", field="parse"
         )
+        logger.error("drawing_sheets_parsing_failed", error=str(e))
         return IngestionResult(
             status=IngestStatus.FAILED, data=None, diagnostics=diag, meta={"path": path}
         )
+
+    logger.info(
+        "body_parsing_started",
+        remaining_pages=len(remaining_doc),
+    )
 
     try:
         result = parse_patent_body_fallible(doc=remaining_doc)
         diag.merge(result.diagnostics)
         patent_body_data = result.data
+        logger.info(
+            "body_parsing_completed",
+            errors=len(result.diagnostics.errors),
+            warnings=len(result.diagnostics.warnings),
+        )
     except Exception as e:
         diag.error(
             "parse.exception", f"Unhandled exception during parsing: {e}", field="parse"
         )
+        logger.error("body_parsing_failed", error=str(e))
         return IngestionResult(
             status=IngestStatus.FAILED, data=None, diagnostics=diag, meta={"path": path}
         )
@@ -215,6 +256,15 @@ def ingest_patent_pdf(
             "front_matter_pages_scanned": front_matter_data.num_sheets,
             "drawing_sheets_pages_scanned": drawing_sheets_data.num_sheets,
         },
+    )
+
+    logger.info(
+        "ingestion_completed",
+        pdf_path=str(path),
+        status=result.status.value,
+        total_errors=len(diag.errors),
+        total_warnings=len(diag.warnings),
+        total_info=len(diag.info),
     )
 
     return result

@@ -76,6 +76,7 @@ class FrontMatterData:
     def canonical(self) -> Dict[str, Any]:
         """
         Produce a stable, test-friendly projection of parse_front_page()/parse_front_matter() output.
+        v1.1 format - matches bundle_v1_1.FrontMatterV1_1 schema.
         """
 
         return {
@@ -83,12 +84,13 @@ class FrontMatterData:
             "title": self.title.value,
             "assignee": self.assignee.value,
             "inventors": [each.value.name for each in self.inventors],
-            "application_no": self.application_number.value,
-            "filed_iso": self.filed_date.value,
-            "grant_iso": self.grant_date.value,
+            "application_number": self.application_number.value,
+            "filed_date": self.filed_date.value,
+            "grant_date": self.grant_date.value,
+            "abstract": self.abstract.value if self.abstract else "",
             "reported_claim_count": self.reported_counts.value.reported_claim_count,
             "reported_drawing_sheet_count": self.reported_counts.value.reported_drawing_sheet_count,
-            "cited_us_patents_digits": [
+            "cited_us_patents": [
                 each.value.canonical
                 for each in self.citations
                 if each.value.type == "US_GRANT"

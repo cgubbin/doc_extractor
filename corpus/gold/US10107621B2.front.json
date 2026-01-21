@@ -1,28 +1,29 @@
 {
-    "patent_number_normalized": "US10107621B2",
-    "title": "IMAGE BASED OVERLAY MEASUREMENT WITH FINITE GRATINGS",
-    "assignee": "Nanometrics Incorporated, Milpitas, CA",
-    "inventors": [
-        "Nigel P. Smith, Beaverton, OR"
-    ],
-    "application_no": "13/766,598",
-    "filed_iso": "2013-02-13",
-    "grant_iso": "2018-10-23",
-    "reported_claim_count": 39,
-    "reported_drawing_sheet_count": 6,
-    "cited_us_patents_digits": [
-        "7616313",
-        "7911612"
-    ],
-    "cited_us_publications": [
-        "20050012928",
-        "20050018190",
-        "20050195398",
-        "20060066855",
-        "20090087756",
-        "20090116014",
-        "20090296075",
-        "20110320986"
-    ],
-    "num_sheets": 2
+  "abstract": "An image based overlay measurement is performed using an overlay target that includes shifted overlying gratings. The overlay target is imaged and an asymmetry is measured in the image of the overlaid gratings. The asymmetry is used to determine the overlay error. For each measurement direc tion, the overlay target may include two or more overlay measurement pads with different offsets between the top and bottom gratings. The measured asymmetries and offsets in the overlay measurement pads may be used to determine the overlay error, e. g., using self-calibration. The pitch and critical dimensions of the overlay target may be optimized to produce a greatest change of symmetry with overlay error for a numerical aperture and wavelength of light used by the image based metrology device.",
+  "application_number": "13/766,598",
+  "assignee": "Nanometrics Incorporated, Milpitas, CA",
+  "cited_us_patents": [
+    "7616313",
+    "7911612"
+  ],
+  "cited_us_publications": [
+    "20050012928",
+    "20050018190",
+    "20050195398",
+    "20060066855",
+    "20090087756",
+    "20090116014",
+    "20090296075",
+    "20110320986"
+  ],
+  "filed_date": "2013-02-13",
+  "grant_date": "2018-10-23",
+  "inventors": [
+    "Nigel P. Smith, Beaverton, OR"
+  ],
+  "num_sheets": 2,
+  "patent_number_normalized": "US10107621B2",
+  "reported_claim_count": 39,
+  "reported_drawing_sheet_count": 6,
+  "title": "IMAGE BASED OVERLAY MEASUREMENT WITH FINITE GRATINGS"
 }

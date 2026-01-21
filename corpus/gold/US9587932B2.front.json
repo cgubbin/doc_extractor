@@ -1,37 +1,38 @@
 {
-    "patent_number_normalized": "US9587932B2",
-    "title": "SYSTEM FOR DIRECTLY MEASURING THE DEPTH OF A HIGH ASPECT RATIO ETCHED FEATURE ON A WAFER",
-    "assignee": "Rudolph Technologies, Inc., Wilmington, MA",
-    "inventors": [
-        "David S. Marx, Newbury Park, CA",
-        "David L. Grant, Newbury Park, CA"
-    ],
-    "application_no": "15/142,864",
-    "filed_iso": "2016-04-29",
-    "grant_iso": "2017-03-07",
-    "reported_claim_count": 15,
-    "reported_drawing_sheet_count": 6,
-    "cited_us_patents_digits": [
-        "6806105",
-        "6822745",
-        "6878301"
-    ],
-    "cited_us_publications": [
-        "20010043333",
-        "20020180991",
-        "20030165178",
-        "20040112863",
-        "20050057747",
-        "20050109729",
-        "20050191858",
-        "20050239223",
-        "20060232768",
-        "20070148792",
-        "20070293052",
-        "20080049214",
-        "20080100222",
-        "20080165357",
-        "20090174931"
-    ],
-    "num_sheets": 2
+  "abstract": "A system (10) for directly measuring the depth of a high aspect ratio etched feature on a wafer (80) that includes an etched surface (82) and a non-etched surface (84). The system (10) utilizes an infrared reflectometer (12) that in a preferred embodiment includes a swept laser (14), a fiber circulator (16), a photodetector (22) and a combination collimator (18) and an objective lens (20). From the objec tive lens (20) a focused incident light (23) is produced that is applied to the non-etched surface (84) of the wafer (80). From the wafer (80) is produced a reflected light (25) that is processed through the reflectometer (12) and applied to an ADC (24) where a corresponding digital data signal (29) is produced. The digital data signal (29) is applied to a computer (30) that, in combination with software (32), measures the depth of the etched feature that is then viewed on a display (34).",
+  "application_number": "15/142,864",
+  "assignee": "Rudolph Technologies, Inc., Wilmington, MA",
+  "cited_us_patents": [
+    "6806105",
+    "6822745",
+    "6878301"
+  ],
+  "cited_us_publications": [
+    "20010043333",
+    "20020180991",
+    "20030165178",
+    "20040112863",
+    "20050057747",
+    "20050109729",
+    "20050191858",
+    "20050239223",
+    "20060232768",
+    "20070148792",
+    "20070293052",
+    "20080049214",
+    "20080100222",
+    "20080165357",
+    "20090174931"
+  ],
+  "filed_date": "2016-04-29",
+  "grant_date": "2017-03-07",
+  "inventors": [
+    "David S. Marx, Newbury Park, CA",
+    "David L. Grant, Newbury Park, CA"
+  ],
+  "num_sheets": 2,
+  "patent_number_normalized": "US9587932B2",
+  "reported_claim_count": 15,
+  "reported_drawing_sheet_count": 6,
+  "title": "SYSTEM FOR DIRECTLY MEASURING THE DEPTH OF A HIGH ASPECTRATIO ETCHED FEATURE ON A WAFER"
 }

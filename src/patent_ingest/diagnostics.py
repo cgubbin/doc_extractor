@@ -103,11 +103,35 @@ class Diagnostics:
             )
         )
 
+    def deduplicate(self) -> "Diagnostics":
+        """Remove duplicate diagnostics based on code, message, and field.
+
+        Keeps the first occurrence of each unique diagnostic.
+        """
+        def _dedupe_list(diags: List[Diagnostic]) -> List[Diagnostic]:
+            seen = set()
+            unique = []
+            for d in diags:
+                # Create a key based on code, message, and field
+                # (ignore where/raw/meta since those can vary for same logical error)
+                key = (d.code, d.message, d.field)
+                if key not in seen:
+                    seen.add(key)
+                    unique.append(d)
+            return unique
+
+        self.errors = _dedupe_list(self.errors)
+        self.warnings = _dedupe_list(self.warnings)
+        self.info = _dedupe_list(self.info)
+        return self
+
     def merge(self, other: "Diagnostics") -> "Diagnostics":
+        """Merge another Diagnostics object into this one, then deduplicate."""
         self.errors.extend(other.errors)
         self.warnings.extend(other.warnings)
         self.info.extend(other.info)
-        return self
+        # Deduplicate after merging to avoid duplicate diagnostics
+        return self.deduplicate()
 
     def diagnostics_as(self, fmt: DiagFormat):
         return render_diagnostics(self, fmt)

@@ -1,2 +1,0 @@
-[console_scripts]
-patent-ingest = patent_ingest.__main__:main
