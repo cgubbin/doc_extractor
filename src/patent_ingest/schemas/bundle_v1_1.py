@@ -63,7 +63,7 @@ class FrontMatterV1_1:
     # Filing & grant info
     application_number: str  # e.g., "16/123,456"
     filed_date: str  # ISO 8601: "2019-01-15"
-    grant_date: str  # ISO 8601: "2021-03-02"
+    grant_date: str | None = None  # ISO 8601: "2021-03-02" (None for published applications)
 
     # Parties
     assignee: str  # Primary assignee
@@ -207,7 +207,6 @@ FRONT_MATTER_SCHEMA = {
         "title",
         "application_number",
         "filed_date",
-        "grant_date",
         "assignee",
         "inventors",
     ],
@@ -216,7 +215,7 @@ FRONT_MATTER_SCHEMA = {
         "title": {"type": "string"},
         "application_number": {"type": "string"},
         "filed_date": {"type": "string"},
-        "grant_date": {"type": "string"},
+        "grant_date": {"type": ["string", "null"]},  # Optional - null for published applications
         "assignee": {"type": "string"},
         "inventors": {"type": "array", "items": {"type": "string"}},
         "abstract": {"type": "string"},

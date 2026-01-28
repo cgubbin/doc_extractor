@@ -66,8 +66,8 @@ class IngestStatus(str, Enum):
 @dataclass(frozen=True)
 class IngestionData:
     front_matter: FrontMatterData
-    drawing_sheets: DrawingSheetsData
-    body: PatentBodyData
+    drawing_sheets: Optional[DrawingSheetsData] = None
+    body: Optional[PatentBodyData] = None
 
 
 @dataclass(frozen=True)
@@ -156,14 +156,33 @@ def ingest_patent_pdf(
     logger.info("front_matter_parsing_started")
 
     try:
-        result = parse_front_matter(doc)  # returns FrontMatterResult(data, diagnostics)
-        diag.merge(result.diagnostics)
-        front_matter_data = result.data
+        front_matter_result = parse_front_matter(
+            doc
+        )  # returns FrontMatterResult(data, diagnostics)
+        diag.merge(front_matter_result.diagnostics)
+
+        front_matter_data = front_matter_result.data
+
+        # Check if parsing returned any data
+        if front_matter_data is None:
+            diag.error(
+                "front_matter.parsing_failed",
+                "Front matter parsing returned no data (catastrophic failure).",
+                field="front_matter",
+            )
+            logger.error("front_matter_parsing_failed", reason="no data returned")
+            return IngestionResult(
+                status=IngestStatus.FAILED,
+                data=None,
+                diagnostics=diag,
+                meta={"path": path},
+            )
+
         logger.info(
             "front_matter_parsing_completed",
             pages_scanned=front_matter_data.num_sheets,
-            errors=len(result.diagnostics.errors),
-            warnings=len(result.diagnostics.warnings),
+            errors=len(front_matter_result.diagnostics.errors),
+            warnings=len(front_matter_result.diagnostics.warnings),
         )
     except Exception as e:
         diag.error(
@@ -176,13 +195,30 @@ def ingest_patent_pdf(
 
     # partition the pdf:
     num_front_pages = front_matter_data.num_sheets
-    num_drawing_pages = (
-        front_matter_data.reported_counts.value.reported_drawing_sheet_count
-    )
     total_pages = len(doc)
-    remaining_doc = doc.subset(
-        pages=range(num_front_pages + num_drawing_pages, total_pages)
-    )
+
+    # Get expected drawing sheet count if available from front matter
+    if front_matter_data.reported_counts:
+        num_drawing_pages = (
+            front_matter_data.reported_counts.value.reported_drawing_sheet_count
+        )
+    elif front_matter_result.meta.get("inferred_drawing_sheet_count") is not None:
+        # Use inferred count from sheet markers found during front matter parsing
+        num_drawing_pages = front_matter_result.meta["inferred_drawing_sheet_count"]
+        logger.info(
+            "drawing_sheets_count_inferred",
+            inferred_count=num_drawing_pages,
+        )
+    else:
+        # If no counts reported and couldn't infer, use conservative estimate
+        diag.warn(
+            "drawing_sheets.no_reported_count",
+            "No reported drawing sheet count found; using conservative estimate.",
+            field="drawing_sheets",
+        )
+        num_drawing_pages = min(
+            20, total_pages - num_front_pages
+        )  # Conservative estimate
 
     logger.info(
         "drawing_sheets_parsing_started",
@@ -192,17 +228,34 @@ def ingest_patent_pdf(
 
     try:
         pages = [
-            ii for ii in range(num_front_pages, num_front_pages + num_drawing_pages)
+            ii
+            for ii in range(
+                num_front_pages, min(num_front_pages + num_drawing_pages, total_pages)
+            )
         ]
         result = parse_drawing_sheets(path, pages, diag)  # returns DrawingSheetsResult
+        print("Result: ", diag)
         diag.merge(result.diagnostics)
         drawing_sheets_data = result.data
-        logger.info(
-            "drawing_sheets_parsing_completed",
-            sheets_parsed=drawing_sheets_data.num_sheets,
-            errors=len(result.diagnostics.errors),
-            warnings=len(result.diagnostics.warnings),
-        )
+
+        # Now we know the actual number of drawing sheets parsed
+        if drawing_sheets_data is not None:
+            actual_drawing_pages = drawing_sheets_data.num_sheets
+            logger.info(
+                "drawing_sheets_parsing_completed",
+                sheets_parsed=actual_drawing_pages,
+                errors=len(result.diagnostics.errors),
+                warnings=len(result.diagnostics.warnings),
+            )
+        else:
+            # Parsing failed - use 0 for body parsing offset
+            actual_drawing_pages = 0
+            logger.error(
+                "drawing_sheets_parsing_failed",
+                reason="parse_drawing_sheets returned None",
+                errors=len(result.diagnostics.errors),
+                warnings=len(result.diagnostics.warnings),
+            )
     except Exception as e:
         diag.error(
             "parse.exception", f"Unhandled exception during parsing: {e}", field="parse"
@@ -211,6 +264,12 @@ def ingest_patent_pdf(
         return IngestionResult(
             status=IngestStatus.FAILED, data=None, diagnostics=diag, meta={"path": path}
         )
+
+    # Calculate remaining document for body parsing
+    # Use actual parsed drawing sheets count
+    remaining_doc = doc.subset(
+        pages=range(num_front_pages + actual_drawing_pages, total_pages)
+    )
 
     logger.info(
         "body_parsing_started",
@@ -235,27 +294,28 @@ def ingest_patent_pdf(
             status=IngestStatus.FAILED, data=None, diagnostics=diag, meta={"path": path}
         )
 
+    ingestion_data = IngestionData(
+        front_matter=front_matter_data,
+        drawing_sheets=drawing_sheets_data,
+        body=patent_body_data,
+    )
+
+    meta = {
+        "path": path,
+        "front_matter_pages_scanned": front_matter_data.num_sheets,
+    }
+    if drawing_sheets_data is not None:
+        meta["drawing_sheets_pages_scanned"] = drawing_sheets_data.num_sheets
+
     result = IngestionResult(
         status=determine_status(
-            data=IngestionData(
-                front_matter=front_matter_data,
-                drawing_sheets=drawing_sheets_data,
-                body=patent_body_data,
-            ),
+            data=ingestion_data,
             diag=diag,
             policy=policy,
         ),
-        data=IngestionData(
-            front_matter=front_matter_data,
-            drawing_sheets=drawing_sheets_data,
-            body=patent_body_data,
-        ),
+        data=ingestion_data,
         diagnostics=diag,
-        meta={
-            "path": path,
-            "front_matter_pages_scanned": front_matter_data.num_sheets,
-            "drawing_sheets_pages_scanned": drawing_sheets_data.num_sheets,
-        },
+        meta=meta,
     )
 
     logger.info(

@@ -1,0 +1,506 @@
+# from __future__ import annotations
+#
+# from typing import List, Optional
+# import statistics
+# import re
+#
+# from patent_ingest.model.model import Block, ColumnStream, Region, Line
+#
+# _WS_RE = re.compile(r"\s+")
+# CAPS_HEADING_RE = re.compile(r"^[A-Z0-9][A-Z0-9\s\-:,]{3,}$")
+#
+# KNOWN_HEADINGS = {
+#     "BACKGROUND",
+#     "SUMMARY",
+#     "BRIEF DESCRIPTION OF THE DRAWINGS",
+#     "DETAILED DESCRIPTION",
+#     "DETAILED DESCRIPTION OF THE EMBODIMENTS",
+#     "FIELD",
+#     "TECHNICAL FIELD",
+#     "CROSS-REFERENCE TO RELATED APPLICATION",
+#     "CROSS-REFERENCE TO RELATED APPLICATIONS",
+#     "RELATED APPLICATION",
+#     "RELATED APPLICATIONS",
+#     "CLAIMS",
+#     "ABSTRACT",
+# }
+#
+# SENT_START_RE = re.compile(r'^[("“‘\[]?[A-Z]')  # coarse: line begins like a sentence
+#
+# ENUM_ONLY_RE = re.compile(r"^\s*(?:\d+|[IVXLC]+|[A-Z])(?:[.)]|:)?\s*$")
+# PAREN_ENUM_RE = re.compile(r"^\s*\(\s*\d+\s*\)\s*$")  # "(1)"
+#
+#
+# def _norm(s: str) -> str:
+#     return _WS_RE.sub(" ", (s or "").strip())
+#
+#
+# def _is_heading_line(line: Line, *, page_width: Optional[float] = None) -> bool:
+#     t = _norm(line.text)
+#     if not t:
+#         return False
+#
+#     u = t.upper()
+#     if u in KNOWN_HEADINGS:
+#         return True
+#
+#     # caps-ish short line heuristic
+#     if len(t) <= 90 and CAPS_HEADING_RE.match(t) and not t.endswith("."):
+#         return True
+#
+#     # Optional: centered-ish heuristic if page_width known
+#     # (many patents center headings; this is weak but can help)
+#     if page_width and line.x0 is not None and line.x1 is not None:
+#         cx = 0.5 * (line.x0 + line.x1)
+#         if (
+#             abs(cx - page_width / 2.0) < page_width * 0.08
+#             and len(t) <= 60
+#             and not t.endswith(".")
+#         ):
+#             # centered and short
+#             return True
+#
+#     return False
+#
+#
+# def classify_line_role(text: str) -> str:
+#     t = (text or "").strip()
+#     if not t:
+#         return "paragraph"
+#
+#     u = t.upper()
+#
+#     # 1) hard section headings (true boundaries)
+#     if u in KNOWN_HEADINGS:
+#         return "section_heading"
+#
+#     # 2) enumerators / labels (NOT boundaries)
+#     if ENUM_ONLY_RE.match(t) or PAREN_ENUM_RE.match(t):
+#         return "enumerator"
+#
+#     # 3) possible subheading (caps-ish short line)
+#     if len(t) <= 90 and CAPS_HEADING_RE.match(t) and not t.endswith("."):
+#         return "subheading"
+#
+#     return "paragraph"
+#
+#
+# def segment_paragraph_blocks(
+#     stream: ColumnStream,
+#     *,
+#     region: Region,
+#     page_width: Optional[float] = None,  # pass if you have it
+#     emit_heading_blocks: bool = True,
+#     # tuning:
+#     gap_mult: float = 2.4,
+#     min_gap: float = 16.0,
+#     indent_thresh: float = 14.0,
+#     short_line_frac: float = 0.70,  # line width < 70% median width considered "short"
+#     min_lines_per_paragraph: int = 1,
+# ) -> List[Block]:
+#     """
+#     Paragraph segmentation without paragraph numbers.
+#
+#     Splits paragraphs using combined cues:
+#       - large vertical gap
+#       - indentation change + sentence boundary cues
+#       - paragraph-final short line + next sentence start
+#     """
+#     lines = [ln for ln in stream.lines if _norm(ln.text)]
+#     if not lines:
+#         return []
+#
+#     # Precompute typical spacing and widths
+#     ys = [ln.y for ln in lines]
+#     gaps = [ys[i + 1] - ys[i] for i in range(len(ys) - 1) if (ys[i + 1] - ys[i]) > 0]
+#     med_gap = statistics.median(gaps) if gaps else 10.0
+#     gap_thresh = max(min_gap, gap_mult * med_gap)
+#
+#     widths = []
+#     for ln in lines:
+#         if ln.x0 is not None and ln.x1 is not None:
+#             widths.append(max(0.0, ln.x1 - ln.x0))
+#     med_width = statistics.median(widths) if widths else None
+#
+#     def line_width(ln: Line) -> Optional[float]:
+#         if ln.x0 is None or ln.x1 is None:
+#             return None
+#         return max(0.0, ln.x1 - ln.x0)
+#
+#     def is_short_line(ln: Line) -> bool:
+#         if med_width is None:
+#             return False
+#         w = line_width(ln)
+#         if w is None:
+#             return False
+#         return w < short_line_frac * med_width
+#
+#     def ends_like_par_end(text: str) -> bool:
+#         t = _norm(text)
+#         return t.endswith((".", "?", "!", ":", ";"))
+#
+#     def starts_like_sentence(text: str) -> bool:
+#         t = _norm(text)
+#         return bool(SENT_START_RE.match(t))
+#
+#     blocks: List[Block] = []
+#     buf: List[Line] = []
+#
+#     def flush(kind: str = "paragraph") -> None:
+#         nonlocal buf
+#         if not buf:
+#             return
+#         if len(buf) < min_lines_per_paragraph:
+#             buf = []
+#             return
+#         txt = "\n".join(_norm(ln.text) for ln in buf if _norm(ln.text)).strip()
+#         if not txt:
+#             buf = []
+#             return
+#         blocks.append(
+#             Block(
+#                 col=stream.col,
+#                 region=region,
+#                 y0=buf[0].y0,
+#                 y1=buf[-1].y1,
+#                 kind=kind,  # "paragraph" or "heading"
+#                 tag=None,
+#                 text=txt,
+#             )
+#         )
+#         buf = []
+#
+#     for i, ln in enumerate(lines):
+#         # headings are standalone blocks
+#         role = classify_line_role(ln.text)
+#
+#         if emit_heading_blocks and role in ("section_heading", "subheading"):
+#             flush("paragraph")
+#             blocks.append(Block(stream.col, region, ln.y0, ln.y1, role, None, ln.text))
+#             continue
+#
+#         if role == "enumerator":
+#             # Option A: keep enumerator attached to paragraph text (recommended for prose)
+#             buf.append(i)
+#             continue
+#         # if emit_heading_blocks and _is_heading_line(ln, page_width=page_width):
+#         #     flush("paragraph")
+#         #     blocks.append(
+#         #         Block(stream.col, region, ln.y0, ln.y1, "heading", None, _norm(ln.text))
+#         #     )
+#         #     continue
+#
+#         if not buf:
+#             buf.append(ln)
+#             continue
+#
+#         prev = buf[-1]
+#         dy = ln.y - prev.y
+#         prev_t = _norm(prev.text)
+#         cur_t = _norm(ln.text)
+#
+#         # indentation cue (needs x0)
+#         indent_jump = False
+#         if prev.x0 is not None and ln.x0 is not None:
+#             indent_jump = abs(ln.x0 - prev.x0) >= indent_thresh
+#
+#         # evidence scoring: conservative; require >=2 unless dy is huge
+#         score = 0
+#
+#         # strong: large gap
+#         if dy >= gap_thresh:
+#             score += 3
+#
+#         # medium: indent jump + sentence boundary cues
+#         if indent_jump and (ends_like_par_end(prev_t) or starts_like_sentence(cur_t)):
+#             score += 2
+#
+#         # medium: previous line looks like paragraph-final (short and ends with punctuation)
+#         if (
+#             is_short_line(prev)
+#             and ends_like_par_end(prev_t)
+#             and starts_like_sentence(cur_t)
+#         ):
+#             score += 2
+#
+#         # weak: two consecutive short lines then sentence start
+#         # (helps when widths are reliable)
+#         if is_short_line(prev) and starts_like_sentence(cur_t):
+#             score += 1
+#
+#         # Apply split decision
+#         if score >= 2:
+#             flush("paragraph")
+#             buf.append(ln)
+#         else:
+#             buf.append(ln)
+#
+#     flush("paragraph")
+#     blocks.sort(key=lambda b: b.y0)
+#     return blocks
+#
+#
+from __future__ import annotations
+
+from typing import List, Optional, Literal
+import re
+import statistics
+
+from patent_ingest.model.model import Block, ColumnStream, Region
+
+# ---------------------------
+# Line role classification
+# ---------------------------
+
+# "Caps-ish" heading line (used for subheadings only; true section headings are whitelisted)
+CAPS_HEADING_RE = re.compile(r"^[A-Z0-9][A-Z0-9\s\-:,]{3,}$")
+
+# Enumerators/labels that are NOT section boundaries
+ENUM_ONLY_RE = re.compile(r"^\s*(?:\d+|[IVXLC]+|[A-Z])(?:[.)]|:)?\s*$")
+PAREN_ENUM_RE = re.compile(r"^\s*\(\s*\d+\s*\)\s*$")
+
+# Sentence end heuristic
+_SENT_END_RE = re.compile(r"[.!?][\"')\]]?\s*$")
+
+KNOWN_SECTION_HEADINGS = {
+    "ABSTRACT",
+    "BACKGROUND",
+    "SUMMARY",
+    "BRIEF DESCRIPTION OF THE DRAWINGS",
+    "DETAILED DESCRIPTION",
+    "DETAILED DESCRIPTION OF THE EMBODIMENTS",
+    "FIELD",
+    "TECHNICAL FIELD",
+    "CROSS-REFERENCE TO RELATED APPLICATION",
+    "CROSS-REFERENCE TO RELATED APPLICATIONS",
+    "RELATED APPLICATION",
+    "RELATED APPLICATIONS",
+    "CLAIMS",
+}
+
+
+PARA_MARK_RE = re.compile(r"^\s*\d{4}\s*(?:[.:)\]]\s*)?.*$")  # 0017, 0017., 0017: ...
+PARA_NUM_ONLY_RE = re.compile(
+    r"^\s*\d{4}\s*(?:[.:)\]]\s*)?$"
+)  # line is just the marker
+
+
+def classify_line_role(
+    text: str,
+) -> Literal["section_heading", "subheading", "enumerator", "para_marker", "paragraph"]:
+    t = (text or "").strip()
+    if not t:
+        return "paragraph"
+
+    u = t.upper()
+
+    # True section headings (boundaries)
+    if u in KNOWN_SECTION_HEADINGS:
+        return "section_heading"
+
+    # If we see a 4-digit marker at the start, treat as paragraph marker
+    # (We don't require it to exist; we just handle it correctly when present.)
+    if PARA_MARK_RE.match(t):
+        return "para_marker"
+
+    # Enumerators / labels (NOT section boundaries)
+    if ENUM_ONLY_RE.match(t) or PAREN_ENUM_RE.match(t):
+        return "enumerator"
+
+    # Subheading candidates (caps-ish short line)
+    if len(t) <= 90 and CAPS_HEADING_RE.match(t) and not t.endswith("."):
+        return "subheading"
+
+    return "paragraph"
+
+
+# ---------------------------
+# Helpers for geometry signals
+# ---------------------------
+
+
+def _robust_mode(values: List[float], bin_size: float = 2.0) -> Optional[float]:
+    """Histogram mode with binning; helps estimate left margin from noisy x0 values."""
+    if not values:
+        return None
+    bins = {}
+    for v in values:
+        b = round(v / bin_size) * bin_size
+        bins[b] = bins.get(b, 0) + 1
+    return max(bins.items(), key=lambda kv: kv[1])[0]
+
+
+def segment_paragraph_blocks(
+    stream: ColumnStream,
+    *,
+    region: Region,
+    # Emit heading-like blocks separately
+    emit_heading_blocks: bool = True,
+    # Whether subheadings should behave like section boundaries (usually True for section slicing)
+    subheadings_are_boundaries: bool = True,
+    # y-gap sensitivity
+    gap_mult: float = 2.4,
+    min_gap: float = 16.0,
+    # indent sensitivity (requires x0)
+    indent_thresh: float = 10.0,
+    # "short line" heuristic (requires x0/x1 or falls back to text length)
+    short_frac: float = 0.62,
+    min_chars_long_line: int = 35,
+    # Avoid producing tiny blocks
+    min_lines_per_block: int = 1,
+) -> List[Block]:
+    """
+    Paragraph segmentation for patent body text WITHOUT relying on paragraph numbers.
+
+    Produces blocks of kinds:
+      - "section_heading"  (true section boundary; whitelist)
+      - "subheading"       (caps-ish line; optional boundary)
+      - "paragraph"        (normal prose)
+      - "enumerator" is NOT emitted as its own block by default; it is kept with the paragraph
+        because it is usually an inline label and not a useful section boundary.
+
+    Boundary signals:
+      - heading lines (hard boundary if emitted; optional for subheading)
+      - vertical y-gap outliers
+      - indentation / margin reset (if x0 present)
+      - short-line + punctuation + margin reset (raggedness)
+    """
+    lines = [ln for ln in stream.lines if (ln.text or "").strip()]
+    if not lines:
+        return []
+
+    # --- Estimate left margin and typical line width for the column ---
+    candidate_x0: List[float] = []
+    widths: List[float] = []
+
+    for ln in lines:
+        role = classify_line_role(ln.text)
+        if role in ("section_heading", "subheading"):
+            continue
+        if ln.x0 is None or ln.x1 is None:
+            continue
+        t = ln.text.strip()
+        if len(t) >= min_chars_long_line:
+            candidate_x0.append(float(ln.x0))
+            widths.append(float(ln.x1 - ln.x0))
+
+    left_margin = _robust_mode(candidate_x0)  # may be None
+    typical_width = statistics.median(widths) if widths else None
+
+    # --- Typical y-gap ---
+    ys = [ln.y for ln in lines]
+    gaps = [ys[i + 1] - ys[i] for i in range(len(ys) - 1) if (ys[i + 1] - ys[i]) > 0]
+    med_gap = statistics.median(gaps) if gaps else 10.0
+    gap_thresh = max(min_gap, gap_mult * med_gap)
+
+    def is_short_line(ln) -> bool:
+        if typical_width is None or ln.x0 is None or ln.x1 is None:
+            return len(ln.text.strip()) < 45
+        return (ln.x1 - ln.x0) < (short_frac * typical_width)
+
+    def near_left_margin(x0: Optional[float]) -> bool:
+        if left_margin is None or x0 is None:
+            return False
+        return abs(x0 - left_margin) <= 3.5
+
+    def indented(x0: Optional[float]) -> bool:
+        if left_margin is None or x0 is None:
+            return False
+        return (x0 - left_margin) >= indent_thresh
+
+    blocks: List[Block] = []
+    buf: List[int] = []
+
+    def flush_paragraph() -> None:
+        nonlocal buf
+        if not buf:
+            return
+        chunk = [lines[i] for i in buf]
+        if len(chunk) < min_lines_per_block:
+            buf = []
+            return
+        text = "\n".join(ln.text.strip() for ln in chunk if ln.text).strip()
+        if not text:
+            buf = []
+            return
+        blocks.append(
+            Block(
+                col=stream.col,
+                region=region,
+                y0=chunk[0].y0,
+                y1=chunk[-1].y1,
+                kind="paragraph",
+                tag=None,
+                text=text,
+            )
+        )
+        buf = []
+
+    # --- Main scan ---
+    for i, ln in enumerate(lines):
+        t = ln.text.strip()
+        role = classify_line_role(t)
+
+        # Hard boundary: section headings always split paragraphs
+        if emit_heading_blocks and role == "section_heading":
+            flush_paragraph()
+            blocks.append(
+                Block(stream.col, region, ln.y0, ln.y1, "section_heading", None, t)
+            )
+            continue
+
+        # Subheadings: optionally behave as boundaries (usually yes for section slicing)
+        if emit_heading_blocks and role == "subheading" and subheadings_are_boundaries:
+            flush_paragraph()
+            blocks.append(
+                Block(stream.col, region, ln.y0, ln.y1, "subheading", None, t)
+            )
+            continue
+
+        # Enumerators: keep them with the paragraph (not a boundary)
+        # If you ever want them as separate blocks, change this to flush+emit.
+        # (But don't treat as section boundary.)
+        if role == "enumerator":
+            buf.append(i)
+            continue
+        if role == "para_marker":
+            # Start a new paragraph block at each marker
+            flush_paragraph()
+            buf.append(i)
+            continue
+
+        # Decide whether to start a new paragraph using geometry + punctuation
+        new_para = False
+        if buf:
+            prev = lines[buf[-1]]
+
+            # 1) big vertical gap
+            if (ln.y - prev.y) >= gap_thresh:
+                new_para = True
+
+            # 2) first-line indent after sentence end / short line
+            if (
+                not new_para
+                and indented(ln.x0)
+                and (near_left_margin(prev.x0) or prev.x0 is None)
+            ):
+                if _SENT_END_RE.search(prev.text.strip()) or is_short_line(prev):
+                    new_para = True
+
+            # 3) hanging indent reset: indented previous, current returns to margin
+            if not new_para and near_left_margin(ln.x0) and indented(prev.x0):
+                new_para = True
+
+            # 4) raggedness: short previous line + margin reset + punctuation
+            if not new_para and is_short_line(prev) and near_left_margin(ln.x0):
+                if _SENT_END_RE.search(prev.text.strip()):
+                    new_para = True
+
+        if new_para:
+            flush_paragraph()
+
+        buf.append(i)
+
+    flush_paragraph()
+    blocks.sort(key=lambda b: b.y0)
+    return blocks

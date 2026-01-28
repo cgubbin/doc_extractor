@@ -1,0 +1,602 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Optional, List, Tuple, Dict
+import re
+import pymupdf
+
+
+_LABEL_RE = re.compile(r"^\(\d+\)$")
+
+INID_RE = re.compile(r"^\(\s*(\d+)\s*\)$")
+
+
+def _cell(s: Optional[str]) -> str:
+    return (s or "").strip()
+
+
+def _row_label_and_col(r) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Returns (label, col) for label-only rows, else (None, None).
+    col is 'L' if label is in r.left, 'R' if in r.right.
+    """
+    l = _cell(r.left)
+    rr = _cell(r.right)
+    if INID_RE.match(l) and not rr:
+        return l, "L"
+    if INID_RE.match(rr) and not l:
+        return rr, "R"
+    return None, None
+
+
+def _is_any_inid_row(r) -> bool:
+    return bool(INID_RE.match(_cell(r.left))) or bool(INID_RE.match(_cell(r.right)))
+
+
+def _content_in_col(r, col: str) -> str:
+    return _cell(r.left) if col == "L" else _cell(r.right)
+
+
+def _other_col_only(r, col: str) -> bool:
+    """
+    True if this row has text only in the *other* column.
+    """
+    if col == "L":
+        return not _cell(r.left) and bool(_cell(r.right))
+    return not _cell(r.right) and bool(_cell(r.left))
+
+
+def _adaptive_buffer(y0: float, y1: float, base: float) -> float:
+    """
+    Prevent y_stop from moving above y0 when labels are close.
+    Use at most 40% of the inter-label distance.
+    """
+    gap = max(0.0, y1 - y0)
+    return min(base, 0.4 * gap)
+
+
+def bind_inid_fields(
+    rows: List["TwoColRow"],
+    *,
+    # pulling above
+    take_above: int = 3,
+    max_above_dy: float = 120.0,
+    max_skip_above: int = 20,
+    # pulling below
+    max_field_span: float = 450.0,
+    # reserve "prefix" area above the next label (in same column)
+    prelude_buffer: float = 80.0,
+) -> List["TwoColRow"]:
+    """
+    Bind INID blocks while respecting the PDF's *physical* two-column layout.
+
+    - (54) Title lives in left column => merged text stays in .left
+    - (57) Abstract lives in right column => merged text stays in .right
+    - Stop boundary for (54) uses the next INID in the *left* column, not global next.
+    - Skips other-column-only rows without terminating scans.
+    """
+    rows = sorted(rows, key=lambda r: r.y)
+
+    # 1) collect label rows with their physical column
+    labels: List[Tuple[int, float, str, str]] = []  # (idx, y, label, col)
+    for i, r in enumerate(rows):
+        lab, col = _row_label_and_col(r)
+        if lab is not None:
+            labels.append((i, r.y, lab, col))
+
+    # 2) for each label row index, compute y_stop using the NEXT label in the SAME column
+    y_stop_for: Dict[int, float] = {}
+    next_label_y_same_col: Dict[int, float] = {}
+
+    # Walk labels per column
+    for col in ("L", "R"):
+        col_labels = [(i, y, lab) for (i, y, lab, c) in labels if c == col]
+        col_labels.sort(key=lambda t: t[1])
+
+        for k, (i, y0, lab) in enumerate(col_labels):
+            # default stop if no next label in same column
+            y_stop = y0 + max_field_span
+            if k + 1 < len(col_labels):
+                y1 = col_labels[k + 1][1]
+                buf = _adaptive_buffer(y0, y1, prelude_buffer)
+                y_stop = min(y_stop, y1 - buf)
+                next_label_y_same_col[i] = y1
+            y_stop_for[i] = y_stop
+
+    # 3) single pass binder
+    out: List["TwoColRow"] = []
+    i = 0
+    while i < len(rows):
+        r = rows[i]
+        lab, col = _row_label_and_col(r)
+
+        if lab is None:
+            out.append(r)
+            i += 1
+            continue
+
+        y0 = r.y
+        y_stop = y_stop_for.get(i, y0 + max_field_span)
+
+        # --- pull ABOVE across columns (skip other-column-only rows) ---
+        adopted_above: List[str] = []
+        skipped_rows: List["TwoColRow"] = []
+        skipped = 0
+
+        while out and len(adopted_above) < take_above and skipped < max_skip_above:
+            prev = out[-1]
+            if _is_any_inid_row(prev):
+                break
+            dy = y0 - prev.y
+            if dy < 0 or dy > max_above_dy:
+                break
+
+            out.pop()  # temporarily remove; we'll either adopt or restore
+
+            txt = _content_in_col(prev, col)
+            if txt:
+                adopted_above.insert(0, txt)
+                continue
+
+            if _other_col_only(prev, col):
+                skipped_rows.append(prev)
+                skipped += 1
+                continue
+
+            # empty/junk: restore and stop
+            skipped_rows.append(prev)
+            break
+
+        if skipped_rows:
+            out.extend(reversed(skipped_rows))
+
+        # --- pull BELOW within same column until y_stop (skip other-column-only rows) ---
+        adopted_below: List[str] = []
+        j = i + 1
+        while j < len(rows):
+            nxt = rows[j]
+            if _is_any_inid_row(nxt):
+                break
+            if nxt.y >= y_stop:
+                break
+
+            txt = _content_in_col(nxt, col)
+            if txt:
+                adopted_below.append(txt)
+            # if other-column-only/empty: just skip
+            j += 1
+
+        merged = "\n".join([lab, *adopted_above, *adopted_below]).strip()
+
+        # Emit merged row in the same physical column
+        if col == "L":
+            out.append(
+                type(r)(
+                    y=r.y, left=merged, right="", left_x0=r.left_x0, right_x0=r.right_x0
+                )
+            )
+        else:
+            out.append(
+                type(r)(
+                    y=r.y, left="", right=merged, left_x0=r.left_x0, right_x0=r.right_x0
+                )
+            )
+
+        i = j
+
+    return sorted(out, key=lambda r: r.y)
+
+
+# def _is_inid_only(r) -> bool:
+#     l = (r.left or "").strip()
+#     rr = (r.right or "").strip()
+#     return (INID_RE.match(l) and not rr) or (INID_RE.match(rr) and not l)
+#
+#
+# def _is_any_inid(r) -> bool:
+#     return bool(INID_RE.match((r.left or "").strip())) or bool(
+#         INID_RE.match((r.right or "").strip())
+#     )
+#
+#
+# def _label_text(r) -> str:
+#     return (r.left or "").strip() or (r.right or "").strip()
+#
+#
+# def _label_num(label: str) -> Optional[int]:
+#     m = INID_RE.match(label)
+#     return int(m.group(1)) if m else None
+#
+#
+# def bind_inid_fields(
+#     rows: List["TwoColRow"],
+#     *,
+#     take_above: int = 3,
+#     max_above_dy: float = 80.0,
+#     # Protect next field's prefix zone:
+#     prelude_buffer: float = 10.0,
+#     # Prevent runaway if next label missing:
+#     max_field_span: float = 320.0,
+#     # How many non-adopted rows we allow to skip while pulling above
+#     max_skip_above: int = 10,
+# ) -> List["TwoColRow"]:
+#     """
+#     Bind INID labels to their field text.
+#
+#     Improvements:
+#       - Pull ABOVE can cross columns: skips right-only rows without stopping.
+#       - Still adopts only LEFT text (your extraction target).
+#       - Stops BELOW at y_stop = next_label_y - prelude_buffer to avoid hoovering
+#         the next block's prefix lines (e.g. 'Inventors:' before (75)).
+#     """
+#     rows = sorted(rows, key=lambda r: r.y)
+#
+#     # Index INID-only label rows and compute a y_stop for each
+#     label_idxs = [i for i, r in enumerate(rows) if _is_inid_only(r)]
+#     stop_y_for_label: Dict[int, float] = {}
+#
+#     for pos, i in enumerate(label_idxs):
+#         y0 = rows[i].y
+#         y_stop = y0 + max_field_span
+#         if pos + 1 < len(label_idxs):
+#             y1 = rows[label_idxs[pos + 1]].y
+#             y_stop = min(y_stop, y1 - prelude_buffer)
+#         stop_y_for_label[i] = y_stop
+#
+#     out: List["TwoColRow"] = []
+#     i = 0
+#
+#     while i < len(rows):
+#         r = rows[i]
+#         # print(f"Processing row {i} at y={r.y}: left='{r.left}' right='{r.right}'")
+#
+#         if not _is_inid_only(r):
+#             out.append(r)
+#             i += 1
+#             continue
+#
+#         label = _label_text(r)
+#         y0 = r.y
+#         y_stop = stop_y_for_label.get(i, y0 + max_field_span)
+#
+#         # ----------------------------
+#         # Pull from ABOVE (cross-column skipping)
+#         # ----------------------------
+#         adopted_above: List[str] = []
+#         popped_total = 0
+#         skipped = 0
+#
+#         # We will temporarily pop rows we "skip" so we can restore them later.
+#         skipped_rows: List["TwoColRow"] = []
+#
+#         while out and len(adopted_above) < take_above and skipped < max_skip_above:
+#             prev = out[-1]
+#             # print("  Checking above row for adoption...", prev, label)
+#             if _is_any_inid(prev):
+#                 break
+#
+#             dy = y0 - prev.y
+#             # print(f"    dy={dy}, max_above_dy={max_above_dy}")
+#             if dy < 0 or dy > max_above_dy:
+#                 break
+#
+#             pl = (prev.left or "").strip()
+#             pr = (prev.right or "").strip()
+#
+#             out.pop()  # remove from stack; we will either adopt or restore
+#             popped_total += 1
+#
+#             # print(f"    left='{pl}' right='{pr}'")
+#             if pl:
+#                 # Adopt left text (field content lives there in your model)
+#                 adopted_above.insert(0, pl)
+#             else:
+#                 # Right-only or empty row: skip it, but keep it in output stream
+#                 skipped_rows.append(prev)
+#                 skipped += 1
+#                 continue
+#
+#         # print(adopted_above, popped_total, skipped)
+#
+#         # Restore skipped rows back onto out, preserving original order
+#         if skipped_rows:
+#             out.extend(reversed(skipped_rows))
+#
+#         # ----------------------------
+#         # Pull from BELOW (skip right-only; stop before next field prefix zone)
+#         # ----------------------------
+#         adopted_below: List[str] = []
+#         j = i + 1
+#         while j < len(rows):
+#             nxt = rows[j]
+#             # print("  Checking below row for adoption...", prev, label)
+#
+#             # print(f"    nxty={nxt.y}, stopy={y_stop}")
+#             if _is_any_inid(nxt):
+#                 break
+#             if nxt.y >= y_stop:
+#                 break
+#
+#             nl = (nxt.left or "").strip()
+#             nr = (nxt.right or "").strip()
+#
+#             # print(f"    left='{nl}' right='{nr}'")
+#             if nl:
+#                 adopted_below.append(nl)
+#             # right-only rows are ignored but do not terminate
+#             j += 1
+#
+#         # print(adopted_above, popped_total, skipped)
+#
+#         content = "\n".join([*adopted_above, *adopted_below]).strip()
+#
+#         out.append(
+#             type(r)(
+#                 y=r.y,
+#                 left=label if (r.left or "").strip() else "",
+#                 right=content,
+#                 left_x0=r.left_x0,
+#                 right_x0=r.right_x0,
+#             )
+#         )
+#
+#         i = j
+#
+#     # print("Final bound rows:", out)
+#     # raise NotImplementedError("Remove this line after debugging")
+#
+#     return out
+#
+
+# -----------------------------
+# Joining + splitting helpers
+# -----------------------------
+
+
+def _auto_header_cut_from_anchor(
+    rows: list[TwoColRow],
+    *,
+    anchor_regex: re.Pattern,
+    pad: float = 6.0,
+) -> Optional[float]:
+    """
+    Find the first row whose left or right text matches anchor_regex (e.g. r'^\(54\)$').
+    Return a y cutoff slightly above it.
+    """
+    for r in sorted(rows, key=lambda r: r.y):
+        if anchor_regex.search(r.left) or anchor_regex.search(r.right):
+            return max(0.0, r.y - pad)
+    return None
+
+
+@dataclass(frozen=True)
+class TwoColRow:
+    y: float
+    left: str = ""
+    right: str = ""
+    left_x0: Optional[float] = None
+    right_x0: Optional[float] = None
+
+
+_PUNCT_NO_SPACE_BEFORE = {",", ".", ";", ":", ")", "]", "}", "%"}
+_PUNCT_NO_SPACE_AFTER = {"(", "[", "{"}
+
+
+def _join_words_stably(words: list[tuple[float, float, float, float, str]]) -> str:
+    if not words:
+        return ""
+    words = sorted(words, key=lambda w: w[0])
+    out: list[str] = []
+    prev = ""
+    for x0, y0, x1, y1, t in words:
+        t = t.strip()
+        if not t:
+            continue
+        if not out:
+            out.append(t)
+        else:
+            if (
+                t in _PUNCT_NO_SPACE_BEFORE
+                or prev in _PUNCT_NO_SPACE_AFTER
+                or prev.endswith("-")
+            ):
+                out.append(t)
+            else:
+                out.append(" " + t)
+        prev = t
+    return "".join(out).strip()
+
+
+def _split_line_by_largest_gap(
+    line_words: list[tuple[float, float, float, float, str]],
+    *,
+    min_gap: float,
+) -> tuple[
+    list[tuple[float, float, float, float, str]],
+    list[tuple[float, float, float, float, str]],
+]:
+    if len(line_words) < 2:
+        return line_words, []
+    ws = sorted(line_words, key=lambda w: w[0])
+    best_gap = 0.0
+    best_i = -1
+    for i in range(len(ws) - 1):
+        gap = ws[i + 1][0] - ws[i][2]
+        if gap > best_gap:
+            best_gap = gap
+            best_i = i
+    if best_gap < min_gap:
+        return ws, []
+    return ws[: best_i + 1], ws[best_i + 1 :]
+
+
+# INID patterns that reliably mark BODY start
+_BODY_START_RE = re.compile(
+    r"""
+    ^\(\s*(54|57)\s*\)$     # (54) Title OR (57) Abstract
+    """,
+    re.VERBOSE,
+)
+
+# Other INIDs that belong to the HEADER even though they are numbered
+_HEADER_ONLY_INID_RE = re.compile(
+    r"""
+    ^\(\s*(10|19|21|22|30|43|51|52|60|63|72|73|74|75|86)\s*\)$
+    """,
+    re.VERBOSE,
+)
+
+
+def split_body_header(
+    rows: List["TwoColRow"],
+    *,
+    body_anchor: int = 54,
+    prelude_max_lines: int = 6,
+    prelude_max_dy: float = 60.0,
+) -> Tuple[List["TwoColRow"], List["TwoColRow"]]:
+    """
+    Split rows into (header, body) using (54) (or other anchor) as body start,
+    but also pull a few left-content lines immediately ABOVE the anchor into the body.
+
+    Key improvement: skips intervening right-only rows instead of stopping early.
+    """
+    rows = sorted(rows, key=lambda r: r.y)
+    anchor = f"({body_anchor})"
+
+    idx = None
+    for i, r in enumerate(rows):
+        if (r.left or "").strip() == anchor or (r.right or "").strip() == anchor:
+            idx = i
+            break
+
+    if idx is None:
+        return [], rows
+
+    header = rows[:idx]
+    body = rows[idx:]
+
+    # Rescue "prelude" lines from header into body
+    y_anchor = rows[idx].y
+    pulled: List["TwoColRow"] = []
+    pulled_count = 0
+
+    # Walk upward; skip right-only rows; pull eligible left-content rows
+    for r in reversed(header):
+        if (y_anchor - r.y) > prelude_max_dy:
+            break
+
+        l = (r.left or "").strip()
+        rr = (r.right or "").strip()
+
+        # Stop if we hit another INID label (don’t cross label boundaries)
+        if INID_RE.match(l) or INID_RE.match(rr):
+            break
+
+        # Skip right-only rows (e.g. “Related U.S. Application Data”)
+        if not l and rr:
+            continue
+
+        # Pull meaningful left-content rows
+        if l and len(l) >= 6:
+            pulled.append(r)
+            pulled_count += 1
+            if pulled_count >= prelude_max_lines:
+                break
+        else:
+            # empty row or tiny junk => stop
+            break
+
+    if pulled:
+        pulled.reverse()
+
+        # Remove the pulled rows from header (by identity)
+        pulled_ids = {id(x) for x in pulled}
+        header = [r for r in header if id(r) not in pulled_ids]
+
+        # Prepend them to body
+        body = pulled + body
+
+    return header, body
+
+
+def extract_two_column_rows(
+    page: pymupdf.Page,
+    *,
+    header_margin: float = 20,
+    footer_margin: float = 20,
+    min_split_gap: float = 22.0,
+    gutter: float = 10.0,  # dead-zone around midline
+) -> list[TwoColRow]:
+    """
+    Returns y-sorted rows with robust left/right assignment.
+
+    IMPORTANT: single-cluster lines are assigned left/right by their line bbox center x.
+    """
+    rect = page.rect
+    x_mid = rect.width / 2.0
+
+    y_min = header_margin
+    y_max = rect.height - footer_margin
+
+    raw = page.get_text("words") or []
+    # words: x0,y0,x1,y1,text, block_no,line_no,word_no
+    line_map: dict[tuple[int, int], list[tuple[float, float, float, float, str]]] = {}
+
+    for w in raw:
+        x0, y0, x1, y1, text, bno, lno, wno = w[:8]
+        cy = (y0 + y1) * 0.5
+        if cy < y_min or cy > y_max:
+            continue
+        t = str(text).strip()
+        if not t:
+            continue
+        line_map.setdefault((int(bno), int(lno)), []).append(
+            (float(x0), float(y0), float(x1), float(y1), t)
+        )
+
+    rows: list[TwoColRow] = []
+    for (_bno, _lno), ws in line_map.items():
+        minx = min(w[0] for w in ws)
+        maxx = max(w[2] for w in ws)
+        miny = min(w[1] for w in ws)
+        maxy = max(w[3] for w in ws)
+        cy = (miny + maxy) * 0.5
+        cx = (minx + maxx) * 0.5
+
+        left_words, right_words = _split_line_by_largest_gap(ws, min_gap=min_split_gap)
+
+        # If we didn't split, decide which column this line belongs to by its center x
+        if right_words == []:
+            txt = _join_words_stably(left_words)
+            if not txt:
+                continue
+
+            if cx > x_mid + gutter:
+                rows.append(
+                    TwoColRow(y=cy, left="", right=txt, left_x0=None, right_x0=minx)
+                )
+            else:
+                rows.append(
+                    TwoColRow(y=cy, left=txt, right="", left_x0=minx, right_x0=None)
+                )
+            continue
+
+        left_txt = _join_words_stably(left_words)
+        right_txt = _join_words_stably(right_words)
+
+        left_x0 = min((w[0] for w in left_words), default=None)
+        right_x0 = min((w[0] for w in right_words), default=None)
+
+        if left_txt or right_txt:
+            rows.append(
+                TwoColRow(
+                    y=cy,
+                    left=left_txt,
+                    right=right_txt,
+                    left_x0=left_x0,
+                    right_x0=right_x0,
+                )
+            )
+
+    rows.sort(key=lambda r: r.y)
+    return rows

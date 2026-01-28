@@ -108,6 +108,7 @@ class Diagnostics:
 
         Keeps the first occurrence of each unique diagnostic.
         """
+
         def _dedupe_list(diags: List[Diagnostic]) -> List[Diagnostic]:
             seen = set()
             unique = []
@@ -217,6 +218,8 @@ def summarize_diagnostics(diag: Diagnostics, *, top_n: int = 5) -> dict[str, Any
         if d.field:
             return f"{d.field}:{d.code}"
         return d.code
+
+    print(diag)
 
     return {
         "ok": len(diag.errors) == 0,

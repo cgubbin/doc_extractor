@@ -127,6 +127,10 @@ def _linear_find_group1_as_raw(
     g_start, g_end = m.span(1)
     g_start, g_end = trim_global_range(linear_text, g_start, g_end)
 
+    # After trimming, the range might be empty (whitespace-only match)
+    if g_end <= g_start:
+        return None
+
     where = global_range_to_where(g_start, g_end, segments)
     out_meta = dict(meta or {})
     out_meta.update(
@@ -165,6 +169,10 @@ def _linear_find_group0_as_raw(
         return None
     g_start, g_end = m.span(0)
     g_start, g_end = trim_global_range(linear_text, g_start, g_end)
+
+    # After trimming, the range might be empty (whitespace-only match)
+    if g_end <= g_start:
+        return None
 
     where = global_range_to_where(g_start, g_end, segments)
     out_meta = dict(meta or {})

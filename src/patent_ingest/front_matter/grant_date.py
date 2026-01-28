@@ -168,11 +168,25 @@ def extract_grant_date(
         )
         return None
 
-    diag.error(
-        "grant_date.missing",
-        "No grant date found in INID(45) or fallback.",
-        field=field,
+    # For published applications (not granted patents), missing grant_date is expected
+    # We don't have patent_id here, but we can check if INID(10) contains publication number
+    inid10 = inid_blocks.get(INIDKind._10)
+    is_publication = (
+        inid10 and inid10.text and ("Pub" in inid10.text or "/A" in inid10.text)
     )
+
+    if is_publication:
+        diag.warn(
+            "grant_date.missing",
+            "No grant date found (expected for published applications).",
+            field=field,
+        )
+    else:
+        diag.error(
+            "grant_date.missing",
+            "No grant date found in INID(45) or fallback.",
+            field=field,
+        )
     return None
 
 

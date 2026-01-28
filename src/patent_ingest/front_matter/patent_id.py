@@ -37,20 +37,31 @@ def _patent_id_valid(s: str) -> bool:
 
 def _patent_id_compact(s: str) -> Optional[str]:
     """
-    Very light “uniform form” without trying to fully interpret types:
+    Very light "uniform form" without trying to fully interpret types:
       "US 10,123,456 B2" -> "US10123456B2"
       "10,123,456"       -> "10123456" (no country if absent)
     If you want always-US, enforce it in here.
+
+    When multiple matches exist, prefer:
+      1) Matches starting with "US"
+      2) Longer matches (more complete)
     """
     if not s:
         return None
     s = _clean_patent_id_text(s)
 
-    m = US_PATENT_FINDER.search(s)
-    if not m:
+    # Find all matches and pick the best one
+    matches = list(US_PATENT_FINDER.finditer(s))
+    if not matches:
         return None
 
-    token = m.group(0)
+    # Prefer matches with "US" prefix, then longer matches
+    best_match = max(matches, key=lambda m: (
+        m.group(0).upper().startswith("US"),  # Prefer "US" prefix
+        len(m.group(0)),  # Prefer longer matches
+    ))
+
+    token = best_match.group(0)
     token = token.upper().replace(" ", "")
     token = token.replace(",", "")
     return token

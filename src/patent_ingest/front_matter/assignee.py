@@ -1,7 +1,6 @@
 import re
-from typing import Any, Sequence, Optional
+from typing import Optional
 
-from patent_ingest.model.span import Span, Where, Position
 from patent_ingest.parsed import ParsedRaw, INIDKind, EntityKind, ParsedNorm
 from patent_ingest.diagnostics import Diagnostics
 from patent_ingest.common import (
@@ -46,12 +45,14 @@ def _clean_assignee_from_inid(raw: ParsedRaw[str]) -> ParsedRaw[str]:
     Apply your old cleaning rules, attempting span refinement when possible.
     """
     original = raw.text or ""
-    s = original
+    s = normalize_punctuation_spacing(original)
 
+    print(f"Cleaning assignee/applicant INID raw text: {s!r}")
     # 0) strip leading label
     s1, strip_idx = strip_leading_label_with_idx(
-        s, ["Assignee", "Assignees", "Assignee:"]
+        s, ["Assignee", "Assignees", "Assignee:", "Applicant:"]
     )
+    print(f" After label strip: {s1!r} (stripped {strip_idx} chars)")
 
     # 0.5) punctuation spacing normalization if you have it
     # If you don't have normalize_punctuation_spacing, replace with s1 = " ".join(s1.split())

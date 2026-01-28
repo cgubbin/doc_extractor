@@ -141,7 +141,11 @@ def main(argv: list[str] | None = None) -> int:
         raise e
 
     if result.ingested.status == IngestStatus.FAILED:
-        raise RuntimeError(f"Patent ingest failed: {result.error_message}")
+        from patent_ingest.diagnostics import summarize_diagnostics
+
+        raise RuntimeError(
+            f"Patent ingest failed: {summarize_diagnostics(result.ingested.diagnostics)}"
+        )
 
     data = result.ingested.data
     if data is None:
