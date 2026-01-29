@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Dict, List
 import pymupdf
 
+from patent_ingest.logging import get_logger
 from patent_ingest.model.model import Block, ColumnStream, PageLayout
 from patent_ingest.model.extract import extract_column_streams
 from patent_ingest.model.region import (
@@ -12,10 +13,8 @@ from patent_ingest.model.region import (
 from patent_ingest.model.noise import detect_noise_cutoff_y, apply_cutoff
 from patent_ingest.model.segment_inid import segment_inid_blocks, inid_label_count
 from patent_ingest.model.segment_para import segment_paragraph_blocks
-from patent_ingest.model.classify import classify_page
 from patent_ingest.model.stitch import (
-    stitch_inid_blocks_across_pages,
-    build_inid_dict_from_pages,
+    build_inid_dict,
     find_inid_cutoff_page,
 )
 
@@ -31,6 +30,9 @@ def build_page_layout(
     # header split tuning
     top_frac: float = 0.22,
     max_band_height: float = 30.0,
+    # running header split tuning (fallback)
+    running_top_band: float = 85.0,
+    running_bottom_band: float = 60.0,
 ) -> PageLayout:
     page = doc.load_page(page_index)
     rect = page.rect
@@ -49,6 +51,35 @@ def build_page_layout(
         page_height=rect.height,
         top_frac=top_frac,
         max_band_height=max_band_height,
+    )
+
+    from patent_ingest.model.util import (
+        split_cross_gutter_header_lines,
+        should_fallback_to_running_split,
+        split_header_body_running,
+    )
+
+    # 2) If generic split likely swallowed content (claims pages etc), fallback to running-header splitter
+    if should_fallback_to_running_split(
+        streams={"L": streams["L"], "R": streams["R"]},
+        header=header,
+        body=body,
+    ):
+        logger = get_logger(__name__)
+        logger.info(f"[layout] fallback running header split on page {page_index}")
+        header, body = split_header_body_running(
+            streams={"L": streams["L"], "R": streams["R"]},
+            page_height=rect.height,
+            top_band=running_top_band,
+            bottom_band=running_bottom_band,
+        )
+
+    # 3) Repair rare cross-gutter header lines (e.g. "(12)...(10)...")
+
+    header = split_cross_gutter_header_lines(
+        header,
+        page_width=rect.width,
+        mid_gutter=mid_gutter,
     )
 
     # Optional: rescue a few lines right above (54) into body if present.
@@ -72,6 +103,7 @@ def build_page_layout(
 def segment_page_blocks(
     layout: PageLayout,
     *,
+    is_inid_page: bool = False,
     region: str = "body",
     keep_unlabelled: bool = True,
     prefix_window: float = 90.0,
@@ -82,18 +114,22 @@ def segment_page_blocks(
     Segments a page into blocks. Column-major by default.
     If INIDs present, uses INID segmentation; otherwise paragraph segmentation.
     """
-    page_type = classify_page(layout, region=region)
-    is_inid_like = page_type.inid_labels >= 3
 
     blocks_L: List[Block] = []
     blocks_R: List[Block] = []
 
     for col, store in (("L", blocks_L), ("R", blocks_R)):
         stream = layout.stream(region, col)
-        if is_inid_like:
+        if is_inid_page:
+            # concatenate header+body streams for this column, preserving y-order
+            lines = list(layout.header[col].lines) + list(layout.body[col].lines)
+            lines.sort(key=lambda ln: getattr(ln, "y0", getattr(ln, "y", 0.0)))
+
+            # build a temporary ColumnStream-compatible object
+            merged_stream = ColumnStream(col, tuple(lines))
             store.extend(
                 segment_inid_blocks(
-                    stream,
+                    merged_stream,
                     region=region,
                     prefix_window=prefix_window,
                     gap_stop=gap_stop,
@@ -173,10 +209,10 @@ def build_document_inid_dict(
         pages_blocks.append(blocks)
 
     # 4) Stitch only within front-matter window
-    stitched_pages = stitch_inid_blocks_across_pages(pages_blocks, top_y_max=220.0)
+    # stitched_pages = stitch_inid_blocks_across_pages(pages_blocks, top_y_max=220.0)
 
     # 5) Build final INID dict
-    return build_inid_dict_from_pages(stitched_pages)
+    return build_inid_dict(pages_blocks)
 
 
 if __name__ == "__main__":

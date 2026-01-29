@@ -1,0 +1,231 @@
+{
+    "drawings": {
+        "count": 7,
+        "page_indices": [
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8
+        ]
+    },
+    "body_pages": [
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21
+    ],
+    "required_inids": [
+        10,
+        12,
+        21,
+        22,
+        45,
+        51,
+        52,
+        54,
+        56,
+        57,
+        58,
+        60,
+        65,
+        71,
+        72,
+        73,
+        74
+    ],
+    "inid_contains": {
+        "10": [
+            "US 10,935,501 B2"
+        ],
+        "12": [
+            "Smith"
+        ],
+        "21": [
+            "16/197,737"
+        ],
+        "22": [
+            "Nov. 21, 2018"
+        ],
+        "45": [
+            "Mar. 2, 2021"
+        ],
+        "51": [
+            "G01N 21/88",
+            "(2006.01)",
+            "G01B 9/02",
+            "(Continued)",
+            "GOIN 21/956",
+            "GO2B 27/28",
+            "GO2B 21/14",
+            "GOIN 21/94",
+            "GOIN 21/21",
+            "GOIN 21/95",
+            "HOIL 21/66",
+            "GO2B 27/58"
+        ],
+        "52": [
+            "GOIN 21/8806 ( 2013.01 ) ; GOIB 9/0208",
+            "(2013.01); GOIB 9/02083 (2013.01);",
+            "CPC",
+            "GOIN 21/21 ( 2013.01 ) ; GOIN 21/94",
+            "(2013.01); GOIN 21/9501 (2013.01); GOIN",
+            "21/956 (2013.01); GOIN 21/95607 (2013.01);",
+            "GO2B 21/14 (2013.01); G02B 27/286",
+            "(2013.01); GOIB 9/02042 (2013.01); GOIB",
+            "2290/70 (2013.01); GOIN 2021/8848",
+            "(2013.01); GOIN 2201/0683 (2013.01); G02B",
+            "27/58 (2013.01); HOIL 22/12 (2013.01)"
+        ],
+        "54": [
+            "SUB-RESOLUTION DEFECT DETECTION"
+        ],
+        "56": [
+            "5,864,394 A",
+            "5,875,029 A",
+            "1/1999 Jordan , III et al.",
+            "2/1999 Jann et al.",
+            "WO",
+            "2004072629 A1",
+            "8/2004",
+            "Larkin, Kieran G., \" Efficient nonlinear algorithm for envelope",
+            "detection in white light interferometry,\\” J. Opt. Soc. Am. A/ vol. 13",
+            "No. 4, Apr. 1996, pp. 832-843.",
+            "6,081,325 A",
+            "6/2000 Leslie",
+            "6,295,382 B1",
+            "9/2001 Karanovic",
+            "6,747,697 B1",
+            "6/2004 Lin et al.",
+            "6,928,185 B2",
+            "8/2005 Yonezawa",
+            "7,230,717 B2",
+            "6/2007 Brock et al.",
+            "7,433,031 B2",
+            "10/2008 Xu",
+            "7,440,092 B2",
+            "10/2008 Shibata",
+            "7,463,765 B2",
+            "12/2008 Messina et al.",
+            "7,532,318 B2",
+            "7,684,032 B1",
+            "7,864,334 B2",
+            "8,000,905 B1",
+            "5/2009 Meeks et al.",
+            "3/2010 Meeks",
+            "1/2011 Jeong",
+            "8/2011 Chen",
+            "8,275,573 B1",
+            "9,013,688 B2",
+            "9,235,885 B2",
+            "2005/0046865 A1",
+            "2006/0067571 Al",
+            "2007/0252986 A1",
+            "2009/0037134 A1",
+            "2009/0248340 A1",
+            "9/2012 Schmit et al.",
+            "4/2015 Gutman",
+            "1/2016 Amzaleg et al.",
+            "3/2005 Brock et al.",
+            "3/2006 Onishi",
+            "11/2007 Sandstrom",
+            "2/2009 Kulkarni et al.",
+            "10/2009 Tian",
+            "2013/0271595 A1",
+            "10/2013 Hiroi",
+            "2016/0061745 A1",
+            "3/2016 Chen",
+            "2016/0163752 A1",
+            "2016/0292840 A1",
+            "2016/0373664 A1",
+            "2017/0016715 Al",
+            "2017/0082425 A1",
+            "2017/0102339 A1",
+            "6/2016 Sambongi et al.",
+            "10/2016 Konecky",
+            "12/2016 Wei",
+            "1/2017 Heidrich et al.",
+            "3/2017 Minekawa",
+            "4/2017 Honda",
+            "(Continued)",
+            "Brock, Neal J. et al, “A pixelated polarizer-based camera for",
+            "instantaneous interferometric measurements,” SPIE vol. 8160-32.",
+            "Kimbrough, Brad et al., “ Dynamic surface roughness profiler,”",
+            "SPIE vol . 8126 , 81260H-1.",
+            "U.S. Appl. No. 16/197,849, filed Nov. 21, 2018.",
+            "Tobin, Kenneth W., “Inspection in Semiconductor Manufacturing,”",
+            "Webster's Encyclopedia of Electrical and Electronic Engineering ,",
+            "vol. 10, pp. 242-262, Wiley & Sons, NY, NY, 1999.",
+            "U.S. Appl. No. 16/197,929, filed Nov. 21 , 2018.",
+            "International Search Report and Written Opinion dated Feb. 27,",
+            "2019 from PCT/US2018/062821 filed Nov. 28, 2018.",
+            "International Search Report and Written Opinion dated Mar. 11,",
+            "2019 from PCT/US2018/ 062825 filed Nov. 28, 2018."
+        ],
+        "57": [
+            "ABSTRACT",
+            "for the pixel of interest."
+        ],
+        "58": [
+            "CPC",
+            "(Continued)",
+            "GOIN 21/8806; GOIN 2021/8848; GOIN",
+            "2201/0683; GOIN 21/9505; GOIN",
+            "21/956; GOIN 21/95607; GOIN 21/94;",
+            "GOIN 21/21; GOIN 21/9501; G01B",
+            "9/02081; GOIB 9/02083; GOIB 2290/70;",
+            "GOIB 9/02042;",
+            "GO2B 27/286; GO2B 21/14; GO2B 27/58;",
+            "HO1L 22/12"
+        ],
+        "60": [
+            "60/738,765",
+            "Sep.",
+            "28, 2018",
+            "62/593,777",
+            "Dec. 1, 2017"
+        ],
+        "65": [
+            "Jun. 6, 2019",
+            "US 2019/0170665 A1"
+        ],
+        "71": [
+            "ONTO INNOVATION INC.,",
+            "Wilmingon, MA (US)"
+        ],
+        "72": [
+            "Nigel P. Smith, Beaverton, OR (US)"
+        ],
+        "73": [
+            "Onto Innovation Inc., Wilmington,",
+            "MA (US)"
+        ],
+        "74": [
+            "Paradice and Li LLP",
+            "Michael P LaPage"
+        ]
+    },
+    "min_section_headings": 7,
+    "expected_section_headings_any": [
+        "CROSS-REFERENCE TO RELATED",
+        "APPLICATIONS",
+        "FIELD OF THE INVENTION",
+        "BACKGROUND",
+        "SUMMARY",
+        "BRIEF DESCRIPTION OF THE DRAWINGS",
+        "DETAILED DESCRIPTION"
+    ]
+}

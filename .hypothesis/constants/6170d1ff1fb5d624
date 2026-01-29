@@ -1,0 +1,4 @@
+# file: /Users/kit/Repos/pdf_ingest/src/patent_ingest/model/segment_para.py
+# hypothesis_version: 6.151.4
+
+[0.62, 2.0, 2.4, 3.5, 10.0, 16.0, '.', 'ABSTRACT', 'BACKGROUND', 'CLAIMS', 'DETAILED DESCRIPTION', 'FIELD', 'RELATED APPLICATION', 'RELATED APPLICATIONS', 'SUMMARY', 'TECHNICAL FIELD', '[.!?][\\"\')\\]]?\\s*$', 'enumerator', 'para_marker', 'paragraph', 'section_heading', 'subheading']

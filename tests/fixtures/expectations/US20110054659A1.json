@@ -1,0 +1,117 @@
+{
+    "drawings": {
+        "count": 10,
+        "page_indices": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10
+        ]
+    },
+    "body_pages": [
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25
+    ],
+    "required_inids": [
+        10,
+        12,
+        19,
+        21,
+        22,
+        43,
+        51,
+        52,
+        54,
+        57,
+        60,
+        73,
+        75
+    ],
+    "inid_contains": {
+        "12": [
+            "Carlson et al."
+        ],
+        "19": [
+            "United States"
+        ],
+        "22": [
+            "Feb. 25, 2008"
+        ],
+        "43": [
+            "Mar. 3, 2011"
+        ],
+        "54": [
+            "WAFER FABRICATION MONITORING",
+            "SYSTEMS AND METHODS, INCLUDING",
+            "EDGE BEAD REMOVAL PROCESSING"
+        ],
+        "57": [
+            "ABSTRACT"
+        ],
+        "73": [
+            "RUDOLPH TECHNOLOGIES,",
+            "INC., Flanders, NJ"
+        ],
+        "75": [
+            "Alan Carlson, Westborough, MA",
+            "Ajay Pai, Crystal, MN",
+            "Tuan D. Le, Porto Alegre",
+            "Antony Ravi Philip, Apple Valley,"
+        ]
+    },
+    "inid_tokens": {
+        "10": {
+            "patent_id": [
+                "US20110054659A1"
+            ]
+        },
+        "21": {
+            "app_id": [
+                "12/527981"
+            ]
+        },
+        "51": {
+            "upsc": [
+                "G06F 9/00"
+            ]
+        },
+        "52": {
+            "uscl": [
+                "700/109"
+            ]
+        },
+        "60": {
+            "app_id": [
+                "60/891289"
+            ]
+        }
+    },
+    "min_section_headings": 6,
+    "expected_section_headings_any": [
+        "BACKGROUND",
+        "SUMMARY",
+        "DETAILED DESCRIPTION",
+        "BRIEF DESCRIPTION OF THE DRAWINGS",
+        "CROSS-REFERENCE TO RELATED",
+        "APPLICATIONS"
+    ]
+}

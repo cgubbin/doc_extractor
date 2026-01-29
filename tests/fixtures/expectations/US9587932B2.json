@@ -1,0 +1,186 @@
+{
+    "drawings": {
+        "count": 6,
+        "page_indices": [
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+        ]
+    },
+    "body_pages": [
+        8,
+        9,
+        10,
+        11,
+        12,
+        13
+    ],
+    "required_inids": [
+        10,
+        12,
+        21,
+        22,
+        45,
+        51,
+        52,
+        54,
+        56,
+        57,
+        58,
+        63,
+        65,
+        73,
+        74
+    ],
+    "inid_contains": {
+        "12": [
+            "Marx et al."
+        ],
+        "22": [
+            "Apr. 29, 2016"
+        ],
+        "45": [
+            "Mar. 7, 2017"
+        ],
+        "54": [
+            "SYSTEM FOR DIRECTLY MEASURING THE",
+            "DEPTH OF A HIGH ASPECTRATIO",
+            "ETCHED FEATURE ON A WAFER"
+        ],
+        "56": [
+            "10/2004 Johnson et al.",
+            "11/2004 De Groot et al.",
+            "4/2005 Mundt",
+            "11/2001 Groot et al.",
+            "12/2002 Takoudis et al.",
+            "9, 2003 Borden et al.",
+            "6, 2004 Chen et al.",
+            "3/2005 Meeks",
+            "5, 2005 Hirooka",
+            "9/2005 Fukunaga et al.",
+            "10, 2005 Mantz et al.",
+            "10, 2006 Borden et al.",
+            "6, 2007 Marx",
+            "12/2007 Le Roy et al.",
+            "2/2008 Maznev et al.",
+            "5/2008 Lewington",
+            "7/2008 Stern et al.",
+            "7/2009 Huber et al."
+        ],
+        "57": [
+            "ABSTRACT",
+            "on a display"
+        ],
+        "63": [
+            "Dec. 31, 2013"
+        ],
+        "65": [
+            "Aug. 18, 2016"
+        ],
+        "71": [
+            "Rudolph Technologies, Inc.,",
+            "Wilmington, MA (US)"
+        ],
+        "72": [
+            "David S. Marx, Newbury Park, CA",
+            "(US); David L. Grant, Newbury Park,",
+            "CA (US)"
+        ],
+        "73": [
+            "Rudolph Technologies, Inc.,",
+            "Wilmington, MA (US)"
+        ],
+        "74": [
+            "Dicke, Billig & Czaja,",
+            "PLLC"
+        ]
+    },
+    "inid_tokens": {
+        "10": {
+            "patent_id": [
+                "US9587932B2"
+            ]
+        },
+        "21": {
+            "app_id": [
+                "15/142864"
+            ]
+        },
+        "51": {
+            "fuzzy": {
+                "ipc": [
+                    "G01N21/55",
+                    "G01B11/22",
+                    "G01B11/06"
+                ],
+                "max_distance": 1
+            }
+        },
+        "52": {
+            "fuzzy": {
+                "ipc": [
+                    "G0IB11/22",
+                    "G0IB11/0633",
+                    "G0IB11/0675",
+                    "G0IB2210/56"
+                ],
+                "max_distance": 1
+            }
+        },
+        "56": {
+            "patent_id": [
+                "US6806105B2",
+                "US6822745B2",
+                "US6878301B2",
+                "US20010043333A1",
+                "US20020180991A1",
+                "US20030165178A1",
+                "US20040112863A1",
+                "US20050057747A1",
+                "US20050109729A1",
+                "US20050191858A1",
+                "US20050239223A1",
+                "US20060232768A1",
+                "US20070148792A1",
+                "US20070293052A1",
+                "US20080049214A1",
+                "US20080100222A1",
+                "US20080165357A1",
+                "US20090174931A1"
+            ]
+        },
+        "58": {
+            "ipc": [
+                "H01L21/00",
+                "H01L22/12",
+                "H01L21/66",
+                "H01J37/3255",
+                "H01J21/3065",
+                "G01B9/02",
+                "G01B11/22"
+            ]
+        },
+        "63": {
+            "app_id": [
+                "14/145497"
+            ]
+        },
+        "65": {
+            "patent_id": [
+                "US20160238378A1"
+            ]
+        }
+    },
+    "min_section_headings": 6,
+    "expected_section_headings_any": [
+        "CROSS-REFERENCE TO RELATED",
+        "APPLICATIONS",
+        "TECHNICAL FIELD",
+        "BACKGROUND ART",
+        "BRIEF DESCRIPTION OF THE DRAWINGS",
+        "DETAILED DESCRIPTION"
+    ]
+}

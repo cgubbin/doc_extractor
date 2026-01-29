@@ -14,10 +14,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = [
-    "pytest>=7.0.0",
-    "pytest-cov>=4.0.0",
-]
+dev = ["pytest>=7.0.0", "pytest-cov>=4.0.0"]
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]
@@ -59,11 +56,7 @@ markers = [
 
 [tool.coverage.run]
 source = ["src/patent_ingest"]
-omit = [
-    "*/tests/*",
-    "*/__pycache__/*",
-    "*/test_*.py",
-]
+omit = ["*/tests/*", "*/__pycache__/*", "*/test_*.py"]
 branch = true
 
 [tool.coverage.report]
@@ -79,4 +72,9 @@ exclude_lines = [
     "if TYPE_CHECKING:",
     "@abstractmethod",
     "@abc.abstractmethod",
+]
+
+[dependency-groups]
+dev = [
+    "hypothesis>=6.151.4",
 ]

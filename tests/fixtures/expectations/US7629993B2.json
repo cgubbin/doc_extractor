@@ -1,0 +1,113 @@
+{
+    "drawings": {
+        "count": 4,
+        "page_indices": [
+            1,
+            2,
+            3,
+            4
+        ]
+    },
+    "body_pages": [
+        5,
+        6,
+        7
+    ],
+    "required_inids": [
+        10,
+        12,
+        21,
+        22,
+        45,
+        51,
+        52,
+        54,
+        57,
+        58,
+        65,
+        73,
+        74,
+        75
+    ],
+    "inid_contains": {
+        "12": [
+            "Harless et al."
+        ],
+        "22": [
+            "Sep. 30, 2002"
+        ],
+        "45": [
+            "Dec. 8, 2009"
+        ],
+        "54": [
+            "AUTOMATED WAFER DEFECT INSPECTION",
+            "SYSTEMUSING BACKSIDE LLUMINATION"
+        ],
+        "57": [
+            "ABSTRACT",
+            "capable of allowing at least Some light to pass through."
+        ],
+        "65": [
+            "Apr. 1, 2004"
+        ],
+        "73": [
+            "Rudolph Technologies, Inc., Flanders",
+            "NJ (US)"
+        ],
+        "74": [
+            "Dicke, Billig & Czaja, PLLC"
+        ],
+        "75": [
+            "Mark Harless, Plymouth, MN (US)",
+            "Jeremy Jenum, Plymouth, MN (US)",
+            "Willard Charles Raymond, Plymouth,"
+        ]
+    },
+    "inid_tokens": {
+        "10": {
+            "patent_id": [
+                "US7629993B2"
+            ]
+        },
+        "21": {
+            "app_id": [
+                "10/262173"
+            ]
+        },
+        "51": {
+            "ipc": [
+                "H04N9/247"
+            ]
+        },
+        "52": {
+            "upsc": [
+                "348/126",
+                "348/76"
+            ]
+        },
+        "58": {
+            "upsc": [
+                "348/125",
+                "348/126",
+                "76",
+                "382/145",
+                "149",
+                "73/105",
+                "356/237.4"
+            ]
+        },
+        "65": {
+            "patent_id": [
+                "US20040061779A1"
+            ]
+        }
+    },
+    "min_section_headings": 5,
+    "expected_section_headings_any": [
+        "BACKGROUND OF THE INVENTION",
+        "SUMMARY OF THE INVENTION",
+        "BRIEF DESCRIPTION OF THE DRAWINGS",
+        "DETAILED DESCRIPTION OF THE PREFERRED",
+        "EMBODIMENT"
+    ]
+}

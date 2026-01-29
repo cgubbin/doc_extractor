@@ -1,0 +1,4 @@
+# file: /Users/kit/Repos/pdf_ingest/src/patent_ingest/model/stitch.py
+# hypothesis_version: 6.151.4
+
+[220.0, 'L', 'R', 'body', 'drawing', 'inid']

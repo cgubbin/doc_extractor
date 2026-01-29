@@ -79,6 +79,22 @@ class PageLayout:
         lines.sort(key=lambda t: t[0])
         return "\n".join(t for _, t in lines if t).strip()
 
+    def split_cross_gutter_header_lines(self) -> "PageLayout":
+        from patent_ingest.model.util import split_cross_gutter_header_lines
+
+        l, r = split_cross_gutter_header_lines(
+            self.header["L"].lines, self.header["R"].lines
+        )
+
+        return PageLayout(
+            page_index=self.page_index,
+            header={
+                "L": ColumnStream(col="L", lines=l),
+                "R": ColumnStream(col="R", lines=r),
+            },
+            body=self.body,
+        )
+
 
 @dataclass(frozen=True)
 class Block:

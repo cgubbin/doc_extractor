@@ -1,0 +1,158 @@
+{
+    "drawings": {
+        "count": 6,
+        "page_indices": [
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+        ]
+    },
+    "body_pages": [
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17
+    ],
+    "required_inids": [
+        10,
+        12,
+        21,
+        22,
+        45,
+        51,
+        52,
+        54,
+        57,
+        58,
+        60,
+        65,
+        73,
+        74
+    ],
+    "inid_contains": {
+        "12": [
+            "Smith"
+        ],
+        "22": [
+            "Feb. 13, 2013"
+        ],
+        "45": [
+            "Oct. 23, 2018"
+        ],
+        "54": [
+            "IMAGE BASED OVERLAY MEASUREMENT",
+            "WITH FINITE GRATINGS"
+        ],
+        "57": [
+            "ABSTRACT",
+            "image based metrology device"
+        ],
+        "60": [
+            "Feb.",
+            "15, 2012"
+        ],
+        "65": [
+            "Aug. 15, 2013"
+        ],
+        "71": [
+            "Nanometrics Incorporated, Milpitas,",
+            "CA (US)"
+        ],
+        "72": [
+            "Nigel P. Smith, Beaverton, OR (US)"
+        ],
+        "73": [
+            "Nanometrics Incorporated, Milpitas,",
+            "CA (US)"
+        ],
+        "74": [
+            "Silicon Valley Patent",
+            "Group LLP"
+        ]
+    },
+    "inid_tokens": {
+        "10": {
+            "patent_id": [
+                "US10107621B2"
+            ]
+        },
+        "21": {
+            "app_id": [
+                "13/766598"
+            ]
+        },
+        "51": {
+            "ipc": [
+                "G01B 11/14",
+                "G01B 11/26",
+                "G03F 7/20",
+                "2006.01"
+            ]
+        },
+        "52": {
+            "ipc": [
+                "G0IB 11/26",
+                "2013.01",
+                "G03F 7/70633"
+            ]
+        },
+        "56": {
+            "patent_id": [
+                "US7616313B2",
+                "US7911612B2",
+                "US20050012928A1",
+                "US20050018190A1",
+                "US20050195398A1",
+                "US20060066855A1",
+                "US20090087756A1",
+                "US20090116014A1",
+                "US20090296075Al",
+                "US20110320986Al"
+            ]
+        },
+        "58": {
+            "ipc": [
+                "G01B 11/27",
+                "G0IB 11/00",
+                "G01B 11/272",
+                "G03F 9/70",
+                "G03F 7/70358",
+                "G03F 7/70633",
+                "G03F 9/7076",
+                "G03F 9/7088",
+                "G03F 9/7049"
+            ],
+            "uspc": [
+                "356/399-401"
+            ]
+        },
+        "60": {
+            "app_id": [
+                "61/599333"
+            ]
+        },
+        "65": {
+            "patent_id": [
+                "US20130208279A1"
+            ]
+        }
+    },
+    "min_section_headings": 5,
+    "expected_section_headings_any": [
+        "CLAIM OF PRIORITY UNDER 35 U.S.C. § 119",
+        "BACKGROUND",
+        "SUMMARY",
+        "BRIEF DESCRIPTION OF THE DRAWINGS",
+        "DETAILED DESCRIPTION"
+    ]
+}

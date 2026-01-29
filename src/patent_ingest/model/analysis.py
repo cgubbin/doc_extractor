@@ -9,8 +9,7 @@ from patent_ingest.model.pipeline import build_page_layout, segment_page_blocks
 from patent_ingest.model.classify import classify_page
 from patent_ingest.model.stitch import (
     find_inid_cutoff_page,
-    stitch_inid_blocks_across_pages,
-    build_inid_dict_from_pages,
+    build_inid_dict,
 )
 from patent_ingest.model.segment_para import segment_paragraph_blocks
 from patent_ingest.model.model import Block, PageLayout
@@ -117,7 +116,31 @@ def analyze_document(doc: pymupdf.Document) -> DocumentAnalysis:
     layouts: List[PageLayout] = [
         build_page_layout(doc, i) for i in range(doc.page_count)
     ]
+
     page_types = [classify_page(lay) for lay in layouts]
+    # for i, pt in enumerate(page_types):
+    #     print(f"Page {i}: classified as {pt.kind}")
+    # if pt.kind == "unknown":
+    #     print(
+    #         "unknown page",
+    #         i,
+    #         "body lines",
+    #         layouts[i].body["L"].lines + layouts[i].body["R"].lines,
+    #     )
+
+    from patent_ingest.model.util import detect_front_matter_pages, smooth_drawing_runs
+
+    page_types = detect_front_matter_pages(layouts, page_types)
+    page_types = smooth_drawing_runs(page_types)
+    # for i, pt in enumerate(page_types):
+    #     print(f"Page {i}: classified as {pt.kind}")
+    #     if pt.kind == "unknown":
+    #         print(
+    #             "unknown page",
+    #             i,
+    #             "body lines",
+    #             layouts[i].body["L"].lines + layouts[i].body["R"].lines,
+    #         )
 
     drawing_pages = [i for i, pt in enumerate(page_types) if pt.kind == "drawing"]
     body_pages = [i for i, pt in enumerate(page_types) if pt.kind == "body"]
@@ -129,11 +152,21 @@ def analyze_document(doc: pymupdf.Document) -> DocumentAnalysis:
     inid_page_blocks: List[List[Block]] = []
     for i in inid_pages:
         # force INID segmentation by using segment_page_blocks (it chooses INID when inid-like)
-        bs = segment_page_blocks(layouts[i], region="body", order="column-major")
+        # if i == 0:
+        #     bs = segment_page_blocks(
+        #         layouts[i], region="header", order="column-major", is_inid_page=True
+        #     )
+        #     inid_page_blocks.append(bs)
+        bs = segment_page_blocks(
+            layouts[i], region="body", order="column-major", is_inid_page=True
+        )
         inid_page_blocks.append(bs)
 
-    stitched = stitch_inid_blocks_across_pages(inid_page_blocks, top_y_max=220.0)
-    inid_dict = build_inid_dict_from_pages(stitched)
+    # stitched = stitch_inid_blocks_across_pages(inid_page_blocks, top_y_max=220.0)
+    # for each in inid_page_blocks:
+    #     print("INID page blocks:")
+    #     print(each)
+    inid_dict = build_inid_dict(inid_page_blocks)
 
     # ---- Body blocks: paragraph segmentation on pages classified as body ----
     body_blocks: List[ParagraphBlock] = []
@@ -165,35 +198,7 @@ def analyze_document(doc: pymupdf.Document) -> DocumentAnalysis:
                     )
                 )
 
-    # for i in body_pages:
-    #     lay = layouts[i]
-    #     # segment per column; keep column-major semantics by emitting L then R
-    #     for col in ("L", "R"):
-    #         seg = segment_paragraph_blocks(lay.body[col], region="body")
-    #         seg.sort(key=lambda b: b.y0)
-    #         for b in seg:
-    #             headings, rest = split_heading_prefix(b.text)
-    #
-    #             for h in headings:
-    #                 body_blocks.append(
-    #                     ParagraphBlock(
-    #                         page=i, col=col, y0=b.y0, y1=b.y1, kind="heading", text=h
-    #                     )
-    #                 )
-    #
-    #             if rest:
-    #                 body_blocks.append(
-    #                     ParagraphBlock(
-    #                         page=i,
-    #                         col=col,
-    #                         y0=b.y0,
-    #                         y1=b.y1,
-    #                         kind="paragraph",
-    #                         text=rest,
-    #                     )
-    #                 )
-
-    headings = [b for b in body_blocks if b.kind == "heading"]
+    headings = [b for b in body_blocks if b.kind == "subheading"]
 
     return DocumentAnalysis(
         inid=InidResult(fields=inid_dict, pages=inid_pages),
@@ -203,24 +208,33 @@ def analyze_document(doc: pymupdf.Document) -> DocumentAnalysis:
 
 
 if __name__ == "__main__":
-    doc = pymupdf.open("/Users/kit/Repos/patent_crawler/data/pdfs/US20110054659A1.pdf")
+    # doc = pymupdf.open("/Users/kit/Repos/patent_crawler/data/pdfs/US20110054659A1.pdf")
+    doc = pymupdf.open(
+        # "/Users/kit/Repos/pdf_ingest/tests/fixtures/pdfs/US7629993B2.pdf"
+        "/Users/kit/Repos/pdf_ingest/tests/fixtures/pdfs/US9587932B2.pdf"
+        # "/Users/kit/Repos/pdf_ingest/tests/fixtures/pdfs/US10107621B2.pdf"
+        # "/Users/kit/Repos/pdf_ingest/tests/fixtures/pdfs/US10935501B2.pdf"
+        # "/Users/kit/Repos/pdf_ingest/tests/fixtures/pdfs/US10937705B2.pdf"
+        # "/Users/kit/Repos/pdf_ingest/tests/fixtures/pdfs/US11346768B1.pdf"
+    )
     analysis = analyze_document(doc)
 
-    for each in analysis.inid.fields.items():
+    sorted_inids = sorted(analysis.inid.fields.items())
+    for each in sorted_inids:
         print("INID:", each)
 
-    print(analysis.drawings)
-
-    for each in analysis.body.headings:
-        print("Para: ", each)
-
-    sections = sections_from_blocks(analysis.body.blocks)
-
-    for sec, blocks in sections.items():
-        print("SECTION:", sec)
-        for b in blocks:
-            print("  ", b)
-    # print(analysis.body.pages)
-
-    # for each in analysis.body.blocks:
-    # print("Para: ", each)
+    # print(analysis.drawings)
+    #
+    # for each in analysis.body.headings:
+    #     print("Para: ", each)
+    # #
+    # sections = sections_from_blocks(analysis.body.blocks)
+    #
+    # for sec, blocks in sections.items():
+    #     print("SECTION:", sec)
+    #     for b in blocks:
+    #         print("  ", b)
+    # # print(analysis.body.pages)
+    #
+    # # for each in analysis.body.blocks:
+    # # print("Para: ", each)

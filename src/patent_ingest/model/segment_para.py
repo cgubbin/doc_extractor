@@ -1,245 +1,3 @@
-# from __future__ import annotations
-#
-# from typing import List, Optional
-# import statistics
-# import re
-#
-# from patent_ingest.model.model import Block, ColumnStream, Region, Line
-#
-# _WS_RE = re.compile(r"\s+")
-# CAPS_HEADING_RE = re.compile(r"^[A-Z0-9][A-Z0-9\s\-:,]{3,}$")
-#
-# KNOWN_HEADINGS = {
-#     "BACKGROUND",
-#     "SUMMARY",
-#     "BRIEF DESCRIPTION OF THE DRAWINGS",
-#     "DETAILED DESCRIPTION",
-#     "DETAILED DESCRIPTION OF THE EMBODIMENTS",
-#     "FIELD",
-#     "TECHNICAL FIELD",
-#     "CROSS-REFERENCE TO RELATED APPLICATION",
-#     "CROSS-REFERENCE TO RELATED APPLICATIONS",
-#     "RELATED APPLICATION",
-#     "RELATED APPLICATIONS",
-#     "CLAIMS",
-#     "ABSTRACT",
-# }
-#
-# SENT_START_RE = re.compile(r'^[("“‘\[]?[A-Z]')  # coarse: line begins like a sentence
-#
-# ENUM_ONLY_RE = re.compile(r"^\s*(?:\d+|[IVXLC]+|[A-Z])(?:[.)]|:)?\s*$")
-# PAREN_ENUM_RE = re.compile(r"^\s*\(\s*\d+\s*\)\s*$")  # "(1)"
-#
-#
-# def _norm(s: str) -> str:
-#     return _WS_RE.sub(" ", (s or "").strip())
-#
-#
-# def _is_heading_line(line: Line, *, page_width: Optional[float] = None) -> bool:
-#     t = _norm(line.text)
-#     if not t:
-#         return False
-#
-#     u = t.upper()
-#     if u in KNOWN_HEADINGS:
-#         return True
-#
-#     # caps-ish short line heuristic
-#     if len(t) <= 90 and CAPS_HEADING_RE.match(t) and not t.endswith("."):
-#         return True
-#
-#     # Optional: centered-ish heuristic if page_width known
-#     # (many patents center headings; this is weak but can help)
-#     if page_width and line.x0 is not None and line.x1 is not None:
-#         cx = 0.5 * (line.x0 + line.x1)
-#         if (
-#             abs(cx - page_width / 2.0) < page_width * 0.08
-#             and len(t) <= 60
-#             and not t.endswith(".")
-#         ):
-#             # centered and short
-#             return True
-#
-#     return False
-#
-#
-# def classify_line_role(text: str) -> str:
-#     t = (text or "").strip()
-#     if not t:
-#         return "paragraph"
-#
-#     u = t.upper()
-#
-#     # 1) hard section headings (true boundaries)
-#     if u in KNOWN_HEADINGS:
-#         return "section_heading"
-#
-#     # 2) enumerators / labels (NOT boundaries)
-#     if ENUM_ONLY_RE.match(t) or PAREN_ENUM_RE.match(t):
-#         return "enumerator"
-#
-#     # 3) possible subheading (caps-ish short line)
-#     if len(t) <= 90 and CAPS_HEADING_RE.match(t) and not t.endswith("."):
-#         return "subheading"
-#
-#     return "paragraph"
-#
-#
-# def segment_paragraph_blocks(
-#     stream: ColumnStream,
-#     *,
-#     region: Region,
-#     page_width: Optional[float] = None,  # pass if you have it
-#     emit_heading_blocks: bool = True,
-#     # tuning:
-#     gap_mult: float = 2.4,
-#     min_gap: float = 16.0,
-#     indent_thresh: float = 14.0,
-#     short_line_frac: float = 0.70,  # line width < 70% median width considered "short"
-#     min_lines_per_paragraph: int = 1,
-# ) -> List[Block]:
-#     """
-#     Paragraph segmentation without paragraph numbers.
-#
-#     Splits paragraphs using combined cues:
-#       - large vertical gap
-#       - indentation change + sentence boundary cues
-#       - paragraph-final short line + next sentence start
-#     """
-#     lines = [ln for ln in stream.lines if _norm(ln.text)]
-#     if not lines:
-#         return []
-#
-#     # Precompute typical spacing and widths
-#     ys = [ln.y for ln in lines]
-#     gaps = [ys[i + 1] - ys[i] for i in range(len(ys) - 1) if (ys[i + 1] - ys[i]) > 0]
-#     med_gap = statistics.median(gaps) if gaps else 10.0
-#     gap_thresh = max(min_gap, gap_mult * med_gap)
-#
-#     widths = []
-#     for ln in lines:
-#         if ln.x0 is not None and ln.x1 is not None:
-#             widths.append(max(0.0, ln.x1 - ln.x0))
-#     med_width = statistics.median(widths) if widths else None
-#
-#     def line_width(ln: Line) -> Optional[float]:
-#         if ln.x0 is None or ln.x1 is None:
-#             return None
-#         return max(0.0, ln.x1 - ln.x0)
-#
-#     def is_short_line(ln: Line) -> bool:
-#         if med_width is None:
-#             return False
-#         w = line_width(ln)
-#         if w is None:
-#             return False
-#         return w < short_line_frac * med_width
-#
-#     def ends_like_par_end(text: str) -> bool:
-#         t = _norm(text)
-#         return t.endswith((".", "?", "!", ":", ";"))
-#
-#     def starts_like_sentence(text: str) -> bool:
-#         t = _norm(text)
-#         return bool(SENT_START_RE.match(t))
-#
-#     blocks: List[Block] = []
-#     buf: List[Line] = []
-#
-#     def flush(kind: str = "paragraph") -> None:
-#         nonlocal buf
-#         if not buf:
-#             return
-#         if len(buf) < min_lines_per_paragraph:
-#             buf = []
-#             return
-#         txt = "\n".join(_norm(ln.text) for ln in buf if _norm(ln.text)).strip()
-#         if not txt:
-#             buf = []
-#             return
-#         blocks.append(
-#             Block(
-#                 col=stream.col,
-#                 region=region,
-#                 y0=buf[0].y0,
-#                 y1=buf[-1].y1,
-#                 kind=kind,  # "paragraph" or "heading"
-#                 tag=None,
-#                 text=txt,
-#             )
-#         )
-#         buf = []
-#
-#     for i, ln in enumerate(lines):
-#         # headings are standalone blocks
-#         role = classify_line_role(ln.text)
-#
-#         if emit_heading_blocks and role in ("section_heading", "subheading"):
-#             flush("paragraph")
-#             blocks.append(Block(stream.col, region, ln.y0, ln.y1, role, None, ln.text))
-#             continue
-#
-#         if role == "enumerator":
-#             # Option A: keep enumerator attached to paragraph text (recommended for prose)
-#             buf.append(i)
-#             continue
-#         # if emit_heading_blocks and _is_heading_line(ln, page_width=page_width):
-#         #     flush("paragraph")
-#         #     blocks.append(
-#         #         Block(stream.col, region, ln.y0, ln.y1, "heading", None, _norm(ln.text))
-#         #     )
-#         #     continue
-#
-#         if not buf:
-#             buf.append(ln)
-#             continue
-#
-#         prev = buf[-1]
-#         dy = ln.y - prev.y
-#         prev_t = _norm(prev.text)
-#         cur_t = _norm(ln.text)
-#
-#         # indentation cue (needs x0)
-#         indent_jump = False
-#         if prev.x0 is not None and ln.x0 is not None:
-#             indent_jump = abs(ln.x0 - prev.x0) >= indent_thresh
-#
-#         # evidence scoring: conservative; require >=2 unless dy is huge
-#         score = 0
-#
-#         # strong: large gap
-#         if dy >= gap_thresh:
-#             score += 3
-#
-#         # medium: indent jump + sentence boundary cues
-#         if indent_jump and (ends_like_par_end(prev_t) or starts_like_sentence(cur_t)):
-#             score += 2
-#
-#         # medium: previous line looks like paragraph-final (short and ends with punctuation)
-#         if (
-#             is_short_line(prev)
-#             and ends_like_par_end(prev_t)
-#             and starts_like_sentence(cur_t)
-#         ):
-#             score += 2
-#
-#         # weak: two consecutive short lines then sentence start
-#         # (helps when widths are reliable)
-#         if is_short_line(prev) and starts_like_sentence(cur_t):
-#             score += 1
-#
-#         # Apply split decision
-#         if score >= 2:
-#             flush("paragraph")
-#             buf.append(ln)
-#         else:
-#             buf.append(ln)
-#
-#     flush("paragraph")
-#     blocks.sort(key=lambda b: b.y0)
-#     return blocks
-#
-#
 from __future__ import annotations
 
 from typing import List, Optional, Literal
@@ -265,14 +23,22 @@ _SENT_END_RE = re.compile(r"[.!?][\"')\]]?\s*$")
 KNOWN_SECTION_HEADINGS = {
     "ABSTRACT",
     "BACKGROUND",
+    "BACKGROUND ART",
+    "BACKGROUND OF THE INVENTION",
     "SUMMARY",
+    "SUMMARY OF THE INVENTION",
     "BRIEF DESCRIPTION OF THE DRAWINGS",
     "DETAILED DESCRIPTION",
+    "DETAILED DESCRIPTION OF THE PREFERRED",
     "DETAILED DESCRIPTION OF THE EMBODIMENTS",
+    "EMBODIMENT",
     "FIELD",
     "TECHNICAL FIELD",
     "CROSS-REFERENCE TO RELATED APPLICATION",
+    "CROSS-REFERENCE TO RELATED",
     "CROSS-REFERENCE TO RELATED APPLICATIONS",
+    "APPLICATION",
+    "APPLICATIONS",
     "RELATED APPLICATION",
     "RELATED APPLICATIONS",
     "CLAIMS",

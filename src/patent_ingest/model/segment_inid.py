@@ -45,6 +45,8 @@ def segment_inid_blocks(
     if not lines:
         return []
 
+    # for ii, each in enumerate(lines):
+    #     print(f"Line {ii}: text={each.text} is_label={is_inid_label_line(each.text)} ")
     labels = [i for i, ln in enumerate(lines) if is_inid_label_line(ln.text)]
     if not labels:
         if keep_unlabelled:

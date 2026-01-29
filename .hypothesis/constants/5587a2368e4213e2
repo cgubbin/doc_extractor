@@ -1,0 +1,4 @@
+# file: /Users/kit/Repos/pdf_ingest/src/patent_ingest/model/extract.py
+# hypothesis_version: 6.151.4
+
+[0.0, 0.5, 2.0, 5.0, 10.0, 22.0, '%', '(', ')', ',', '-', '.', ':', ';', 'L', 'R', '[', ']', 'words', '{', '}']

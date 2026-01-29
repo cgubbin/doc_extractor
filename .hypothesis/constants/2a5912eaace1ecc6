@@ -1,0 +1,4 @@
+# file: /Users/kit/Repos/pdf_ingest/src/patent_ingest/model/pipeline.py
+# hypothesis_version: 6.151.4
+
+[0.22, 5.0, 10.0, 20.0, 22.0, 30.0, 70.0, 90.0, 200.0, 220.0, 'INID:', 'L', 'R', '__main__', 'body', 'column-major', 'row-major']
