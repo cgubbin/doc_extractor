@@ -11,24 +11,48 @@ from tests.normalise import normalise_for_contains
 #   2008/01653.57 A1
 #
 # Critical: avoid month/year like "11/2001" by requiring year NOT preceded by digit+slash.
+
 _USPUB_RE = re.compile(
-    r"(?<!\d/)\b"  # NOT preceded by e.g. "11/"
-    r"(?P<year>19\d{2}|20\d{2})"  # 4-digit year
-    r"\s*[/\.]\s*"  # slash or dot separator (common OCR variants)
-    r"(?P<serial>[\d\s,\.]{6,12})"  # 6–8 digits with OCR noise separators
-    r"\s*(?P<kind>[A-Z0-9]\d)\b",  # kind code; allow OCR digit in letter slot (82)
+    r"(?<!\d/)\b"  # avoid matching month/year like 11/2009 as the year
+    r"(?P<year>19\d{2}|20\d{2})"
+    r"\s*[/\.]\s*"
+    r"(?P<serial>[\d\s,\.]{6,12})"
+    r"\s*"
+    r"(?P<kind>[A-Z0-9]{2})"  # A1 / AL / AI / 82 etc
+    r"(?:"  # optional trailing month/year, glued or spaced
+    r"\s*(?P<md>\d{1,2}\s*/\s*(?:19\d{2}|20\d{2}))"
+    r")?"
+    r"\b",
     re.IGNORECASE,
 )
 
 
+# def _fix_kind(kind: str) -> str:
+#     k = kind.upper().replace(" ", "")
+#     # Fix OCR in kind-letter position only (penultimate char)
+#     if len(k) == 2 and k[0].isdigit() and k[1].isdigit():
+#         if k[0] == "8":
+#             return "B" + k[1]
+#         if k[0] == "4":
+#             return "A" + k[1]
+#     return k
+
+
 def _fix_kind(kind: str) -> str:
     k = kind.upper().replace(" ", "")
-    # Fix OCR in kind-letter position only (penultimate char)
+
+    # Normalize common OCR in the 2-char kind token
+    # AL/AI/A| -> A1
+    if len(k) == 2 and k[0] == "A" and k[1] in {"L", "I", "|"}:
+        return "A1"
+
+    # Existing: allow OCR digit in kind-letter position (82 -> B2)
     if len(k) == 2 and k[0].isdigit() and k[1].isdigit():
         if k[0] == "8":
             return "B" + k[1]
         if k[0] == "4":
             return "A" + k[1]
+
     return k
 
 
