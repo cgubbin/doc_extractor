@@ -178,6 +178,7 @@ def ingest_patent_pdf(
     logger.info("front_matter_parsing_started")
 
     try:
+        logger.info("inid_parsing_started")
         front_matter = parse_inids(read.inid, policy=ParsePolicy())
         diag.merge(front_matter.diagnostics)
 

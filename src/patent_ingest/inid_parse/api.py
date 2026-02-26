@@ -3,6 +3,7 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict, Field
 
 from patent_ingest.diagnostics import Diagnostics
+from patent_ingest.structured_logger import get_logger
 from patent_ingest.model.analysis import InidResult
 
 from .registry import ParsePolicy
@@ -35,7 +36,10 @@ def parse_inids(raw: InidResult, *, policy: ParsePolicy) -> ParsedFrontMatterV1:
 
     Returns semantic output only (the thing downstream should consume).
     """
+    logger = get_logger(__name__)
+    logger.info("raw_inid_parse_started")
     phase0 = parse_front_matter(raw, policy=policy)  # may raise MissingRequiredInids
+    logger.info("semantic_inid_parse_started")
     semantic = parse_front_matter_semantic(phase0, policy=policy)
     return semantic
 

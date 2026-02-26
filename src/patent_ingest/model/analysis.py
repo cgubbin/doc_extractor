@@ -160,15 +160,21 @@ def analyze_document(doc: pymupdf.Document) -> DocumentAnalysis:
     inid_cutoff = find_inid_cutoff_page(layouts)
     inid_pages = list(range(0, inid_cutoff))
 
+    # Rebuild body page layouts with line number filtering enabled
+    for i in body_pages:
+        layouts[i] = build_page_layout(doc, i, filter_line_numbers=True)
+
     # ---- INIDs: segment+stitch only inside inid_pages ----
     inid_page_blocks: List[List[Block]] = []
     for i in inid_pages:
         # force INID segmentation by using segment_page_blocks (it chooses INID when inid-like)
-        # if i == 0:
-        #     bs = segment_page_blocks(
-        #         layouts[i], region="header", order="column-major", is_inid_page=True
-        #     )
-        #     inid_page_blocks.append(bs)
+
+        # for the first page we want to keep the header, which contains important INID data
+        if i == 0:
+            bs = segment_page_blocks(
+                layouts[i], region="header", order="column-major", is_inid_page=True
+            )
+            inid_page_blocks.append(bs)
         bs = segment_page_blocks(
             layouts[i], region="body", order="column-major", is_inid_page=True
         )
@@ -211,6 +217,10 @@ def analyze_document(doc: pymupdf.Document) -> DocumentAnalysis:
                 )
 
     body_blocks = merge_multiline_headings(body_blocks)
+
+    # Ensure correct reading order: sort by page, then column (L before R), then y-position
+    # This fixes cases where paragraph segmentation or merging causes slight ordering issues
+    body_blocks.sort(key=lambda b: (b.page, b.col, b.y0))
 
     headings = [b for b in body_blocks if b.kind == "subheading"]
 

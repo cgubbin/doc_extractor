@@ -52,7 +52,8 @@ class ParsedFrontMatter(BaseModel):
 
 def _build_raw_semantic(reg: ParsedInidRegistry) -> RawSemantic:
     # Prefer (10) if present else (12). (Some formats encode pub no/kind inconsistently.)
-    pub = reg.data.get(INIDKind._10) or reg.inid.get(INIDKind._12)
+    pub = reg.data.get(INIDKind._10) or reg.data.get(INIDKind._12)
+    inventors = reg.data.get(INIDKind._72) or reg.data.get(INIDKind._75)
 
     return RawSemantic(
         publication_id=pub.strip() if pub else None,
@@ -61,7 +62,7 @@ def _build_raw_semantic(reg: ParsedInidRegistry) -> RawSemantic:
         grant_date=(reg.data.get(INIDKind._45) or "").strip() or None,
         title=(reg.data.get(INIDKind._54) or "").strip() or None,
         abstract=(reg.data.get(INIDKind._57) or "").strip() or None,
-        inventors=(reg.data.get(INIDKind._75) or "").strip() or None,
+        inventors=inventors.strip() or None,
         assignee=(reg.data.get(INIDKind._73) or "").strip() or None,
     )
 
@@ -77,19 +78,25 @@ def parse_front_matter(raw: InidResult, *, policy: ParsePolicy) -> ParsedFrontMa
 
     Token extraction + typed semantic parsing will be layered on next.
     """
+    from patent_ingest.structured_logger import get_logger
+
+    logger = get_logger(__name__)
+
     try:
+        logger.debug("registry_parse_started")
         reg = parse_inid_registry(raw, policy=policy)
     except MissingRequiredINIDs:
         # If fail_fast is set, parse_inid_registry raises; we still want to preserve
         # diagnostics for caller visibility if they catch the exception.
         raise
-
+    raw_semantic = _build_raw_semantic(reg)
     fm = ParsedFrontMatter(
         inid=reg.data,
         pages=reg.pages,
         diagnostics=reg.diagnostics,
-        raw_semantic=_build_raw_semantic(reg),
+        raw_semantic=raw_semantic,
     )
+    logger.debug("parse_front_matter_completed")
 
     # Optional: if you want a hard stop on *any* errors even when fail_fast is False
     # you can add another policy flag later and raise here based on diagnostics.

@@ -32,6 +32,7 @@ def build_page_layout(
     # running header split tuning (fallback)
     running_top_band: float = 85.0,
     running_bottom_band: float = 60.0,
+    filter_line_numbers: bool = False,  # Disable by default, enable for body pages if needed
 ) -> PageLayout:
     page = doc.load_page(page_index)
     rect = page.rect
@@ -42,6 +43,7 @@ def build_page_layout(
         footer_margin=footer_margin,
         min_split_gap=min_split_gap,
         mid_gutter=mid_gutter,
+        filter_line_numbers=filter_line_numbers,
     )
     from patent_ingest.model.region import (
         choose_header_splitter,

@@ -233,6 +233,10 @@ def parse_patent(
             with open(pdf_path_use, "rb") as f:
                 pdf_sha256 = _sha256(f.read())
 
+        # If no doc ID provided try to infer from what was parsed out
+        if doc_id is None:
+            doc_id = result.data.front_matter.identification.publication.primary
+
         # Calculate elapsed time
         end_time = time.perf_counter()
         elapsed_time_ms = (end_time - start_time) * 1000.0

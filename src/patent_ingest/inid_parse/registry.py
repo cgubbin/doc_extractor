@@ -6,6 +6,7 @@ from typing import Optional
 from pydantic import BaseModel, Field, ConfigDict, field_validator
 
 from patent_ingest.diagnostics import Diagnostics
+from patent_ingest.structured_logger import get_logger
 from patent_ingest.model.analysis import InidResult
 
 
@@ -117,9 +118,13 @@ def parse_inid_registry(raw: InidResult, *, policy: ParsePolicy) -> ParsedInidRe
     diag = Diagnostics()
     out: dict[INIDKind, str] = {}
 
+    logger = get_logger(__name__)
+
     # --- map raw tags to INIDKind ---
     for tag in raw.fields:
+        logger.debug("processing_inid_tag", tag=tag)
         kind = INIDKind.from_code(str(tag))
+        logger.debug("processing_inid_kind", kind=kind)
         if kind is None:
             if policy.warn_on_unknown_inids:
                 diag.warn(
@@ -138,6 +143,7 @@ def parse_inid_registry(raw: InidResult, *, policy: ParsePolicy) -> ParsedInidRe
 
         out[kind] = s
 
+    logger.debug("registry_parse_result", data=out, pages=raw.pages)
     res = ParsedInidRegistry(data=out, pages=raw.pages, diagnostics=diag)
 
     # --- policy checks (presence/emptiness only) ---
@@ -191,5 +197,7 @@ def parse_inid_registry(raw: InidResult, *, policy: ParsePolicy) -> ParsedInidRe
 
     if missing and policy.fail_fast:
         raise MissingRequiredINIDs(res.diagnostics.as_("text"))
+
+    logger.debug("parsed_inid_registry_completed")
 
     return res

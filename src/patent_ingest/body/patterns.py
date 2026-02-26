@@ -535,10 +535,7 @@ def _extract_figure_ids(text: str) -> List[str]:
         return []
 
     ids: List[str] = []
-    print(text)
-    raise NotImplementedError("")
     for m in _FIG_REF_RE.finditer(text):
-        print(m)
         figlist = m.group("figlist")
         try:
             # Reuse the same figlist parsing used for drawing descriptions.

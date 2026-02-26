@@ -140,16 +140,37 @@ _ABSTRACT_TAIL_RE = re.compile(
 )
 
 
+_CLAIMS_RE = re.compile(
+    r"(?P<claims>\d{1,3})\s+CLAIMS?,?",
+    re.IGNORECASE,
+)
+
+_SHEETS_RE = re.compile(
+    r"(?P<draw>\d{1,3})\s+DRAWING\s+SHEETS?",
+    re.IGNORECASE,
+)
+
+
 def split_abstract_tail(text: str) -> tuple[str, dict[str, int]]:
     """
     Returns (clean_abstract, meta) where meta may include claims_count and drawing_sheets_count.
     """
     s = text.rstrip()
-    m = _ABSTRACT_TAIL_RE.search(s)
-    if not m:
+    d = _SHEETS_RE.search(s)
+    if not d:
         return s, {}
-    meta: dict[str, int] = {"claims_count": int(m.group("claims"))}
-    if m.group("draw"):
-        meta["drawing_sheets_count"] = int(m.group("draw"))
-    s2 = s[: m.start()].rstrip()
-    return s2, meta
+
+    s2 = s[: d.start()].rstrip()
+
+    c = _CLAIMS_RE.search(s)
+    if not c:
+        return s2, {}
+
+    s3 = s2[: c.start()].rstrip()
+
+    meta: dict[str, int] = {
+        "claims_count": int(c.group("claims")),
+        "drawing_sheets_count": int(d.group("draw")),
+    }
+
+    return s3, meta

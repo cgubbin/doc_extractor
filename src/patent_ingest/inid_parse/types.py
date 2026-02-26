@@ -46,6 +46,7 @@ def _canon_people_field(pf: PeopleField) -> List[str]:
 class Identification(BaseModel):
     model_config = ConfigDict(frozen=True)
     publication: TokenField = Field(default_factory=TokenField)
+    prior_publication: TokenField = Field(default_factory=TokenField)
 
 
 class Application(BaseModel):
@@ -95,6 +96,7 @@ class ParsedFrontMatterV1(BaseModel):
             "pages": list(self.pages),
             "identification": {
                 "publication": _canon_token_field(self.identification.publication),
+                "prior_publication": _canon_token_field(self.identification.prior_publication),
             },
             "application": {
                 "application_number": _canon_token_field(

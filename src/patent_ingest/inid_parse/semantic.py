@@ -115,17 +115,21 @@ def parse_front_matter_semantic(
     grant45_raw = raw.inid.get(INIDKind._45, "")
     grant45_clean = clean_grant_date(grant45_raw)
 
-    # --- IDs / tokens (still useful now) ---
+    # --- IDs / tokens ---
+    # Separate patent publication (10, 12) from prior publication (65)
     pub_raw = "\n".join(
         [
             raw.inid.get(INIDKind._10, ""),
             raw.inid.get(INIDKind._12, ""),
-            raw.inid.get(INIDKind._65, ""),
         ]
     ).strip()
     pub_tokens = extract_patent_id_tokens(pub_raw, include_bare_us=True)
-    # If multiple tokens, prefer the grant/patent number in (10) when present.
     pub_primary = _primary_or_none(pub_tokens)
+
+    # Prior publication data (65) stored separately
+    prior_pub_raw = raw.inid.get(INIDKind._65, "").strip()
+    prior_pub_tokens = extract_patent_id_tokens(prior_pub_raw, include_bare_us=True) if prior_pub_raw else []
+    prior_pub_primary = _primary_or_none(prior_pub_tokens)
 
     app_raw = "\n".join([app21_clean, raw.inid.get(INIDKind._86, "")]).strip()
     app_tokens = extract_application_id_tokens(app_raw)
@@ -173,6 +177,7 @@ def parse_front_matter_semantic(
         diagnostics=diag,
         identification=Identification(
             publication=TokenField(raw=pub_raw, tokens=pub_tokens, primary=pub_primary),
+            prior_publication=TokenField(raw=prior_pub_raw, tokens=prior_pub_tokens, primary=prior_pub_primary),
         ),
         application=Application(
             application_number=TokenField(
