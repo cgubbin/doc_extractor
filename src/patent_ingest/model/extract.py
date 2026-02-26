@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Dict, List
 import pymupdf
 
@@ -61,8 +62,9 @@ def _is_likely_line_number(text: str) -> bool:
     """
     Check if text is likely a line/paragraph number (short numeric token).
 
-    IMPORTANT: Excludes parenthesized numbers like "(10)", "(21)" which are
-    INID codes on front matter pages and must be preserved.
+    IMPORTANT: Excludes:
+    - Parenthesized numbers like "(10)", "(21)" - INID codes
+    - Numbers with period like "6.", "17." - claim/list markers
     """
     text = text.strip()
     if len(text) > 6:
@@ -70,6 +72,10 @@ def _is_likely_line_number(text: str) -> bool:
 
     # Never filter parenthesized numbers - these are INID codes
     if text.startswith('(') and text.endswith(')'):
+        return False
+
+    # Never filter numbers followed by period - these are claim/list markers
+    if re.match(r'^\d{1,3}\.$', text):
         return False
 
     # Match pure numbers or numbers with minimal decoration

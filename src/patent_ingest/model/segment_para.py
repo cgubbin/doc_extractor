@@ -210,11 +210,17 @@ def segment_paragraph_blocks(
             )
             continue
 
-        # Enumerators: keep them with the paragraph (not a boundary)
-        # If you ever want them as separate blocks, change this to flush+emit.
-        # (But don't treat as section boundary.)
+        # Enumerators: Multi-digit numeric enumerators (claim numbers) start new paragraphs.
+        # Single-letter/roman numerals are kept inline.
         if role == "enumerator":
-            buf.append(i)
+            # Check if this is a multi-digit claim number (1-3 digits + period)
+            # These should start new paragraphs for proper claim separation
+            if re.match(r'^\s*\d{1,3}\s*\.\s*$', t):
+                flush_paragraph()
+                buf.append(i)
+            else:
+                # Single letters/roman numerals: keep inline
+                buf.append(i)
             continue
         if role == "para_marker":
             # Start a new paragraph block at each marker
