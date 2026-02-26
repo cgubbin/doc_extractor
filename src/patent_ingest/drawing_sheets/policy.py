@@ -12,15 +12,13 @@ class DrawingSheetsStatus(str, Enum):
 
 @dataclass(frozen=True)
 class DrawingSheetsPolicy:
-    # structural
-    require_at_least_one_region: bool = True
-
-    # expected count checks (optional: if you know expected sheets or expected drawings)
+    require_at_least_one_region: bool = False
     expected_sheet_count: Optional[int] = None
     strict_expected_sheet_count: bool = False
-
-    # if you treat warnings as errors for QA runs
     warnings_are_errors: bool = False
-
-    # safety cap / guardrails
     max_regions_per_page: int = 50
+
+    # NEW: heuristic enforcement
+    validate_sheet_of_marker: bool = False
+    strict_sheet_of_marker: bool = False
+    min_sheet_of_hit_rate: float = 0.4  # warn if below this

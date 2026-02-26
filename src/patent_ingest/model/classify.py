@@ -245,6 +245,7 @@ def classify_page(
       - body: headings OR claims signal OR density fallback
       - unknown: last resort
     """
+
     header = _header_text(layout)
     if SHEET_RE.search(header):
         return PageType("drawing", inids=0)

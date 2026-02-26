@@ -7,7 +7,7 @@ import re
 from difflib import SequenceMatcher
 
 from patent_ingest.model.document import read_pdf_to_multipage
-from patent_ingest.front_matter.model import parse_front_matter
+# from patent_ingest.front_matter.model import parse_front_matter
 
 ROOT = os.path.dirname(os.path.dirname(__file__))
 SAMPLES_DIR = os.path.join(ROOT, "..", "corpus", "samples")

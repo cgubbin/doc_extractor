@@ -135,60 +135,6 @@ def extract_patent_id_tokens(
     return out
 
 
-# PATENT_ID_RE = re.compile(
-#     r"\b(?:US|WO|EP|JP|CN)\s*"
-#     r"(?:"
-#     r"\d{4}\s*/\s*\d{4,7}"  # publication application style: 2011/0054659
-#     r"|"
-#     r"\d{1,3}(?:,\d{3}){1,3}"  # comma-grouped numbers: 1,123,321 or 9,587,932
-#     r"|"
-#     r"\d{7,9}"  # plain digits: 7629993
-#     r")\s*"
-#     r"[A-Z0-9]\d\b",  # <-- allow OCR '8' etc in the kind letter position
-#     re.IGNORECASE,
-# )
-# PATENT_ID_RE = re.compile(
-#     r"\b(?:US|WO|EP|JP|CN)\s*"
-#     r"(?:"
-#     # Publication application style:
-#     #  - with slash: 2004/0061779
-#     #  - sometimes OCR drops slash: 20040061779
-#     r"\d{4}(?:\s*/\s*|\s+)?\d{6,8}"
-#     r"|"
-#     # Comma-grouped granted/published numbers: 1,123,321
-#     r"\d{1,3}(?:,\d{3}){1,3}"
-#     r"|"
-#     # Plain digits: 7629993
-#     r"\d{7,9}"
-#     r")\s*"
-#     # Kind code: allow OCR digit in kind letter slot (e.g. 82 for B2)
-#     r"[A-Z0-9]\d\b",
-#     re.IGNORECASE,
-# )
-#
-#
-# def extract_patent_id_tokens(text: str) -> Set[str]:
-#     s = normalise_for_contains(text)
-#     out = set()
-#     for m in PATENT_ID_RE.findall(s):
-#         tok = m.upper().replace(" ", "").replace("/", "").replace(",", "")
-#
-#         # Fix OCR in KIND letter position: e.g. "...82" should become "...B2"
-#         # We only touch the *penultimate* char (kind letter) if it's a digit.
-#         if len(tok) >= 2:
-#             kind_letter = tok[-2]
-#             kind_digit = tok[-1]
-#             if kind_letter.isdigit() and kind_digit.isdigit():
-#                 # Most common OCR: 8->B, 0->D/O (rare). Keep it minimal and safe:
-#                 if kind_letter == "8":
-#                     tok = tok[:-2] + "B" + tok[-1]
-#                 # If you later observe other confusions, add them here narrowly.
-#
-#         out.add(tok)
-#     return out
-#
-
-
 def extract_ipc_tokens(text: str) -> Set[str]:
     s = normalise_for_contains(text)
     # normalise spaces out for stable comparison

@@ -1,16 +1,29 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import List, Optional, Literal
 import re
 import statistics
 
 from patent_ingest.model.model import Block, ColumnStream, Region
+from patent_ingest.common.section_rules import is_known_section_heading
+
+
+@dataclass(frozen=True)
+class ParagraphBlock:
+    page: int
+    col: Literal["L", "R"]
+    y0: float
+    y1: float
+    kind: Literal["section_heading", "paragraph", "enumerator", "para_marker"]
+    text: str
+
 
 # ---------------------------
 # Line role classification
 # ---------------------------
 
-# "Caps-ish" heading line (used for subheadings only; true section headings are whitelisted)
+# "Caps-ish" heading line (used for subheadings only)
 CAPS_HEADING_RE = re.compile(r"^[A-Z0-9][A-Z0-9\s\-:,]{3,}$")
 
 # Enumerators/labels that are NOT section boundaries
@@ -19,31 +32,6 @@ PAREN_ENUM_RE = re.compile(r"^\s*\(\s*\d+\s*\)\s*$")
 
 # Sentence end heuristic
 _SENT_END_RE = re.compile(r"[.!?][\"')\]]?\s*$")
-
-KNOWN_SECTION_HEADINGS = {
-    "ABSTRACT",
-    "BACKGROUND",
-    "BACKGROUND ART",
-    "BACKGROUND OF THE INVENTION",
-    "SUMMARY",
-    "SUMMARY OF THE INVENTION",
-    "BRIEF DESCRIPTION OF THE DRAWINGS",
-    "DETAILED DESCRIPTION",
-    "DETAILED DESCRIPTION OF THE PREFERRED",
-    "DETAILED DESCRIPTION OF THE EMBODIMENTS",
-    "EMBODIMENT",
-    "FIELD",
-    "TECHNICAL FIELD",
-    "CROSS-REFERENCE TO RELATED APPLICATION",
-    "CROSS-REFERENCE TO RELATED",
-    "CROSS-REFERENCE TO RELATED APPLICATIONS",
-    "APPLICATION",
-    "APPLICATIONS",
-    "RELATED APPLICATION",
-    "RELATED APPLICATIONS",
-    "CLAIMS",
-    "CLAIM OF PRIORITY UNDER 35 U.S.C. § 119",
-}
 
 
 PARA_MARK_RE = re.compile(r"^\s*\d{4}\s*(?:[.:)\]]\s*)?.*$")  # 0017, 0017., 0017: ...
@@ -59,10 +47,8 @@ def classify_line_role(
     if not t:
         return "paragraph"
 
-    u = t.upper()
-
-    # True section headings (boundaries)
-    if u in KNOWN_SECTION_HEADINGS:
+    # True section headings: delegated to common/section_rules — single source of truth.
+    if is_known_section_heading(t):
         return "section_heading"
 
     # If we see a 4-digit marker at the start, treat as paragraph marker

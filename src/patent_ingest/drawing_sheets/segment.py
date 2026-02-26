@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-import re
 
 from patent_ingest.common import patterns
 
@@ -791,7 +790,7 @@ def _segment_drawings_on_page(
             )
             if figure_items:
                 used_source = "text"
-                diag.info_msg(
+                diag.info(
                     "drawing_segmentation.figures_text_used",
                     "Detected figure labels from embedded text.",
                     field=field,
@@ -826,7 +825,7 @@ def _segment_drawings_on_page(
             figure_items = items_ocr
             used_source = "ocr" if figure_items else None
             if figure_items:
-                diag.info_msg(
+                diag.info(
                     "drawing_segmentation.figures_ocr_used",
                     "Detected figure labels via OCR fallback.",
                     field=field,
@@ -983,7 +982,7 @@ def _segment_drawings_on_page(
             ):
                 crop_px = cand
                 used_radius = True
-                diag.info_msg(
+                diag.info(
                     "drawing_segmentation.radius_fallback_used",
                     "Expanded crop using radius fallback around label center.",
                     field=field,

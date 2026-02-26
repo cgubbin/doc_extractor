@@ -14,7 +14,7 @@ from patent_ingest.pipeline import (
     ingest_patent_pdf,
     IngestionResult,
 )
-from patent_ingest.logging import get_logger
+from patent_ingest.structured_logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -280,7 +280,7 @@ def export_artifacts(
     doc_id = (
         doc_id
         or parse_result.doc_id
-        or parse_result.ingested.data.front_matter.patent_id.value
+        or parse_result.ingested.data.front_matter.identification.publication.primary
         or "unknown_doc"
     )
     diag = parse_result.ingested.diagnostics
@@ -396,7 +396,7 @@ def export_artifacts(
 
         manifest["created_utc"] = datetime.today().strftime("%Y-%m-%d")
         manifest["elapsed_time_ms"] = round(parse_result.elapsed_time_ms, 2)
-        manifest["diagnostics"] = diag.diagnostics_as(DiagFormat.JSON)
+        manifest["diagnostics"] = diag.as_(DiagFormat.JSON)
 
         key = f"{doc_id}/manifest.json"
         sink.put_json(key, manifest)

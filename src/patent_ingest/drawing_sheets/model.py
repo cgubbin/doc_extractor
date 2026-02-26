@@ -69,12 +69,12 @@ def determine_drawing_sheets_status(
     if data is None:
         return DrawingSheetsStatus.FAILED
 
-    if policy.warnings_are_errors and diag.warnings:
-        for w in diag.warnings:
-            diag.errors.append(w)
-        diag.warnings.clear()
+    # warnings->errors (if you support this mechanic)
+    if policy.warnings_are_errors:
+        for w in list(diag.warnings()):
+            diag.error(w.code, w.message, field="drawing_sheets", **(w.meta or {}))
 
-    if diag.errors:
+    if any(diag.errors()):
         return DrawingSheetsStatus.FAILED
 
     if policy.require_at_least_one_region and len(data.regions) == 0:
@@ -85,12 +85,11 @@ def determine_drawing_sheets_status(
         )
         return DrawingSheetsStatus.FAILED
 
-    # Optional: enforce expected sheet count (pages scanned)
     if policy.expected_sheet_count is not None:
-        found = len(data.pages)
+        found = len(data.sheets)
         exp = policy.expected_sheet_count
         if found != exp:
-            msg = f"Drawing sheet page range has {found} pages, expected {exp}."
+            msg = f"Parsed {found} drawing sheets, expected {exp}."
             if policy.strict_expected_sheet_count:
                 diag.error(
                     "drawing_sheets.sheet_count_mismatch",
@@ -109,7 +108,9 @@ def determine_drawing_sheets_status(
             )
             return DrawingSheetsStatus.PARTIAL
 
-    return DrawingSheetsStatus.PARTIAL if diag.warnings else DrawingSheetsStatus.OK
+    return (
+        DrawingSheetsStatus.PARTIAL if any(diag.warnings()) else DrawingSheetsStatus.OK
+    )
 
 
 from pypdf import PdfReader
@@ -178,56 +179,61 @@ def aggregate_sheet_parses(
 
 def parse_drawing_sheets(
     pdf_path: str,
-    page_indices: Sequence[int],  # explicit page indices (0-based)
+    page_indices: Sequence[int],
     diag: Diagnostics,
     *,
     policy: DrawingSheetsPolicy = DrawingSheetsPolicy(),
 ) -> DrawingSheetsResult:
-    """
-    Fallible: never raises for expected issues. On catastrophic exceptions returns FAILED with diagnostics.
-    Parsing returns only regions (bbox + metadata). Export is handled elsewhere.
-    """
     try:
-        # 0) Check all the pages passed are valid drawing sheets
+        # 0) Optional heuristic validation (non-authoritative)
+        if policy.validate_sheet_of_marker and page_indices:
+            reader = PdfReader(pdf_path)
+            hits = []
+            for i in page_indices:
+                try:
+                    text = reader.pages[i].extract_text() or ""
+                except Exception:
+                    text = ""
+                if _SHEET_OF_RE.search(text):
+                    hits.append(i)
 
-        # Heuristic validation (non-authoritative)
-        heuristic_hits = []
-        reader = PdfReader(pdf_path)
-        for i in page_indices:
-            text = reader.pages[i].extract_text() or ""
-            if _SHEET_OF_RE.search(text):
-                heuristic_hits.append(i)
-        if heuristic_hits != page_indices:
-            diag.error(
-                "drawing_sheets.heuristic_mismatch",
-                "Heuristic check for 'Sheet X of Y' patterns did not match expected drawing sheet pages.",
-            )
-            return DrawingSheetsResult(
-                status=DrawingSheetsStatus.FAILED,
-                data=None,
-                diagnostics=diag,
-                meta={"pdf_path": pdf_path},
-            )
+            hit_rate = len(hits) / max(1, len(page_indices))
+            if hit_rate < policy.min_sheet_of_hit_rate:
+                msg = (
+                    f"'Sheet X of Y' marker hit rate {hit_rate:.2f} "
+                    f"({len(hits)}/{len(page_indices)}) on supposed drawing pages."
+                )
+                if policy.strict_sheet_of_marker:
+                    diag.error(
+                        "drawing_sheets.sheet_of_low_hit_rate",
+                        msg,
+                        field="drawing_sheets",
+                        hit_rate=hit_rate,
+                    )
+                    return DrawingSheetsResult(
+                        status=DrawingSheetsStatus.FAILED,
+                        data=None,
+                        diagnostics=diag,
+                        meta={"pdf_path": pdf_path},
+                    )
+                diag.warn(
+                    "drawing_sheets.sheet_of_low_hit_rate",
+                    msg,
+                    field="drawing_sheets",
+                    hit_rate=hit_rate,
+                )
 
-        # 1) Open PDF and locate drawings per page
         parses: list[SheetParse] = []
-
         for p in page_indices:
             try:
-                sheet = _segment_drawings_on_page(  # your per-page function
-                    pdf_path,
-                    p,
-                    diag,
-                    # pass through segmentation parameters here
-                )
+                sheet = _segment_drawings_on_page(pdf_path, p, diag)
                 parses.append(sheet)
             except Exception as e:
-                # per-page failures are usually warnings => PARTIAL
                 diag.warn(
                     "drawing_sheets.page_failed",
                     f"Failed to parse drawing sheet page {p}: {e}",
                     field="drawing_sheets",
-                    meta={"page": p},
+                    page=p,
                 )
 
         data = aggregate_sheet_parses(
@@ -237,9 +243,9 @@ def parse_drawing_sheets(
     except Exception as e:
         diag.error(
             "drawing_sheets.exception",
-            f"Unhandled exception during drawing sheets parsing: {e}",
+            f"Unhandled exception during drawing sheets parsing: {type(e).__name__}: {e}",
             field="drawing_sheets",
-            meta={"pdf_path": pdf_path},
+            pdf_path=pdf_path,
         )
         return DrawingSheetsResult(
             status=DrawingSheetsStatus.FAILED,

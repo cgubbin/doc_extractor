@@ -74,7 +74,19 @@ def extract_column_streams(
     y_min = header_margin
     y_max = rect.height - footer_margin
 
-    raw = page.get_text("words") or []
+    raw = page.get_text("words") or None
+    # print(f"Extracted {len(raw) if raw else 0} words from page {page.number}")
+    if not raw:
+        # print("Retrying with OCR...")
+        tp = page.get_textpage_ocr(
+            language="eng", dpi=300, full=True
+        )  # add "deu+eng" etc if needed
+        raw = page.get_text("words", textpage=tp)
+        # print(raw)
+        # print(
+        # f"Extracted {len(raw) if raw else 0} words from OCR on page {page.number}"
+        # )
+
     line_map: dict[tuple[int, int], list[tuple[float, float, float, float, str]]] = {}
 
     # word tuple: x0,y0,x1,y1,text, block_no,line_no,word_no

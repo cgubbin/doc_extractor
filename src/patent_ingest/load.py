@@ -3,7 +3,7 @@ from pathlib import Path
 import json
 from typing import Any
 
-from patent_ingest.claims import (
+from patent_ingest.body.claims import (
     align_claims,
     diff_claims,
     Claim,
@@ -20,23 +20,25 @@ class PatentMeta:
     inventors: list[str]
     title: str
     abstract: str
-    cited_us_patents: list[str]
-    cited_us_publications: list[str]
+    references: list[str]
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "PatentMeta":
         """Load from v1.1 bundle format (matches bundle_v1_1.FrontMatterV1_1)."""
+        ident = d.get("identification", {})
+        app = d.get("application", {})
+        parties = d.get("parties", {})
+        tech = d.get("technical", {})
         return cls(
-            id=d.get("patent_number_normalized", "") or "",  # v1.1: fixed spelling
-            application_number=d.get("application_number", "") or "",
-            assignee=d.get("assignee", "") or "",
-            filed_date=d.get("filed_date", "") or "",  # v1.1: consistent naming
-            grant_date=d.get("grant_date", "") or "",  # v1.1: consistent naming
-            inventors=list(d.get("inventors", []) or []),
-            title=d.get("title", "") or "",
-            abstract=d.get("abstract", "") or "",
-            cited_us_patents=list(d.get("cited_us_patents", []) or []),
-            cited_us_publications=list(d.get("cited_us_publications", []) or []),
+            id=ident.get("publication", {}).get("primary", ""),
+            application_number=app.get("application_number", {}).get("primary", ""),
+            assignee=parties.get("assignee", ""),
+            inventors=parties.get("inventors", []),
+            filed_date=app.get("filing_date", ""),
+            grant_date=app.get("grant_date", ""),
+            title=tech.get("title", ""),
+            abstract=tech.get("abstract", ""),
+            references=tech.get("references", []),
         )
 
 

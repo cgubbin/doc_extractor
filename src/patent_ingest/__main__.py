@@ -21,7 +21,7 @@ def main(argv: list[str] | None = None) -> int:
         ExportSpec,
         parse_patent,
     )
-    from patent_ingest.logging import get_logger
+    from patent_ingest.structured_logger import get_logger
 
     logger = get_logger(__name__)
 

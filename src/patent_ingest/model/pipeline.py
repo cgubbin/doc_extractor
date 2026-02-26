@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Dict, List
 import pymupdf
 
-from patent_ingest.logging import get_logger
 from patent_ingest.model.model import Block, ColumnStream, PageLayout
 from patent_ingest.model.extract import extract_column_streams
 from patent_ingest.model.region import (
@@ -44,35 +43,29 @@ def build_page_layout(
         min_split_gap=min_split_gap,
         mid_gutter=mid_gutter,
     )
-
-    header, body = split_header_body_generic(
-        streams["L"],
-        streams["R"],
-        page_height=rect.height,
-        top_frac=top_frac,
-        max_band_height=max_band_height,
+    from patent_ingest.model.region import (
+        choose_header_splitter,
+        split_header_body_strict_metadata,
     )
+
+    mode = choose_header_splitter(streams["L"], streams["R"], page_height=rect.height)
+
+    if mode == "strict_metadata":
+        header, body = split_header_body_strict_metadata(
+            streams["L"], streams["R"], page_height=rect.height
+        )
+    else:
+        header, body = split_header_body_generic(
+            streams["L"],
+            streams["R"],
+            page_height=rect.height,
+            top_frac=top_frac,
+            max_band_height=max_band_height,
+        )
 
     from patent_ingest.model.util import (
         split_cross_gutter_header_lines,
-        should_fallback_to_running_split,
-        split_header_body_running,
     )
-
-    # 2) If generic split likely swallowed content (claims pages etc), fallback to running-header splitter
-    if should_fallback_to_running_split(
-        streams={"L": streams["L"], "R": streams["R"]},
-        header=header,
-        body=body,
-    ):
-        logger = get_logger(__name__)
-        logger.info(f"[layout] fallback running header split on page {page_index}")
-        header, body = split_header_body_running(
-            streams={"L": streams["L"], "R": streams["R"]},
-            page_height=rect.height,
-            top_band=running_top_band,
-            bottom_band=running_bottom_band,
-        )
 
     # 3) Repair rare cross-gutter header lines (e.g. "(12)...(10)...")
 

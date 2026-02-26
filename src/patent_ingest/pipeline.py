@@ -25,19 +25,25 @@ from enum import Enum
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Optional
+import pymupdf
 
 
 # --- Imports from your existing modules ---
 # Adjust these import paths if your package structure differs.
-from patent_ingest.front_matter.model import (
-    FrontMatterData,
-    parse_front_matter,
+from patent_ingest.inid_parse import (
+    parse_inids,
+    ParsePolicy,
+    ParsedFrontMatterV1,
+    MissingRequiredINIDs,
 )
-from patent_ingest.body.parse import parse_patent_body_fallible, PatentBodyData
+from patent_ingest.body.parse import (
+    parse_patent_body_from_body_result_fallible,
+    PatentBodyData,
+)
 from patent_ingest.drawing_sheets.model import parse_drawing_sheets, DrawingSheetsData
-from patent_ingest.model.document import read_pdf_to_multipage
+from patent_ingest.model.analysis import analyze_document
 from patent_ingest.diagnostics import Diagnostics
-from patent_ingest.logging import get_logger
+from patent_ingest.structured_logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -65,7 +71,7 @@ class IngestStatus(str, Enum):
 
 @dataclass(frozen=True)
 class IngestionData:
-    front_matter: FrontMatterData
+    front_matter: ParsedFrontMatterV1
     drawing_sheets: Optional[DrawingSheetsData] = None
     body: Optional[PatentBodyData] = None
 
@@ -140,7 +146,7 @@ def ingest_patent_pdf(
     logger.info("ingestion_started", pdf_path=str(path))
 
     try:
-        doc = read_pdf_to_multipage(path)
+        doc = pymupdf.open(path)
         logger.info("pdf_loaded", pdf_path=str(path), page_count=len(doc))
     except Exception as e:
         diag.error(
@@ -153,156 +159,137 @@ def ingest_patent_pdf(
             status=IngestStatus.FAILED, data=None, diagnostics=diag, meta={"path": path}
         )
 
+    try:
+        read = analyze_document(doc)
+        logger.info("pdf_read", pdf_path=str(path), page_count=len(doc))
+    except Exception as e:
+        diag.error(
+            "pdf.read_failure",
+            f"Failed to analyse PDF at {path}: {e}",
+            exception=e,
+        )
+        logger.error("pdf_load_failed", pdf_path=str(path), error=str(e))
+        return IngestionResult(
+            status=IngestStatus.FAILED, data=None, diagnostics=diag, meta={"path": path}
+        )
+
+    # TODO; Use the ingestion policy...
+
     logger.info("front_matter_parsing_started")
 
     try:
-        front_matter_result = parse_front_matter(
-            doc
-        )  # returns FrontMatterResult(data, diagnostics)
-        diag.merge(front_matter_result.diagnostics)
-
-        front_matter_data = front_matter_result.data
-
-        # Check if parsing returned any data
-        if front_matter_data is None:
-            diag.error(
-                "front_matter.parsing_failed",
-                "Front matter parsing returned no data (catastrophic failure).",
-                field="front_matter",
-            )
-            logger.error("front_matter_parsing_failed", reason="no data returned")
-            return IngestionResult(
-                status=IngestStatus.FAILED,
-                data=None,
-                diagnostics=diag,
-                meta={"path": path},
-            )
+        front_matter = parse_inids(read.inid, policy=ParsePolicy())
+        diag.merge(front_matter.diagnostics)
 
         logger.info(
             "front_matter_parsing_completed",
-            pages_scanned=front_matter_data.num_sheets,
-            errors=len(front_matter_result.diagnostics.errors),
-            warnings=len(front_matter_result.diagnostics.warnings),
+            pages_scanned=front_matter.pages,
+            errors=front_matter.diagnostics.num_errors(),
+            warnings=front_matter.diagnostics.num_warnings(),
+        )
+    except MissingRequiredINIDs as e:
+        # known/expected quality failure
+        diag.merge(e.diagnostics)
+        diag.error("front_matter.missing_required", str(e), field="front_matter")
+        logger.info(
+            "front_matter_parsing_incomplete", missing=getattr(e, "missing", None)
+        )
+        return IngestionResult(
+            status=IngestStatus.FAILED, data=None, diagnostics=diag, meta={"path": path}
         )
     except Exception as e:
         diag.error(
-            "parse.exception", f"Unhandled exception during parsing: {e}", field="parse"
+            "parse.exception",
+            f"Unhandled exception during parsing: {type(e).__name__}: {e}",
+            field="parse",
+            exc_type=type(e).__name__,
         )
-        logger.error("front_matter_parsing_failed", error=str(e))
+        logger.error("front_matter_parsing_failed", error=str(e), exc_info=True)
         return IngestionResult(
             status=IngestStatus.FAILED, data=None, diagnostics=diag, meta={"path": path}
         )
 
-    # partition the pdf:
-    num_front_pages = front_matter_data.num_sheets
-    total_pages = len(doc)
-
-    # Get expected drawing sheet count if available from front matter
-    if front_matter_data.reported_counts:
-        num_drawing_pages = (
-            front_matter_data.reported_counts.value.reported_drawing_sheet_count
-        )
-    elif front_matter_result.meta.get("inferred_drawing_sheet_count") is not None:
-        # Use inferred count from sheet markers found during front matter parsing
-        num_drawing_pages = front_matter_result.meta["inferred_drawing_sheet_count"]
-        logger.info(
-            "drawing_sheets_count_inferred",
-            inferred_count=num_drawing_pages,
-        )
+    # drawing pages: trust detection, treat reported count as a check
+    num_drawing_pages = read.drawings.count
+    reported = getattr(front_matter.technical, "drawing_sheets_count", None)
+    if reported is not None:
+        if reported != num_drawing_pages:
+            diag.warn(
+                "drawing_sheets.count_mismatch",
+                f"Reported drawing sheets count ({reported}) does not match detected drawing pages ({num_drawing_pages}).",
+                reported=reported,
+                detected=num_drawing_pages,
+            )
     else:
-        # If no counts reported and couldn't infer, use conservative estimate
         diag.warn(
             "drawing_sheets.no_reported_count",
-            "No reported drawing sheet count found; using conservative estimate.",
-            field="drawing_sheets",
+            "No reported drawing sheet count found; cannot verify OCR count.",
         )
-        num_drawing_pages = min(
-            20, total_pages - num_front_pages
-        )  # Conservative estimate
+
+    front_span = (max(front_matter.pages) + 1) if front_matter.pages else 0
+    drawing_indices = read.drawings.page_indices or []
+
+    drawing_start = min(drawing_indices) if drawing_indices else front_span
+    drawing_end = max(drawing_indices) if drawing_indices else (drawing_start - 1)
 
     logger.info(
         "drawing_sheets_parsing_started",
-        expected_pages=num_drawing_pages,
-        page_range=f"{num_front_pages}-{num_front_pages + num_drawing_pages - 1}",
+        detected_pages=len(drawing_indices),
+        reported_pages=getattr(front_matter.technical, "drawing_sheets_count", None),
+        page_range=f"{drawing_start}-{drawing_end}" if drawing_indices else None,
     )
 
+    drawing_sheets_data = None
     try:
-        pages = [
-            ii
-            for ii in range(
-                num_front_pages, min(num_front_pages + num_drawing_pages, total_pages)
-            )
-        ]
-        result = parse_drawing_sheets(path, pages, diag)  # returns DrawingSheetsResult
-        print("Result: ", diag)
+        # prefer no shared diag passed in
+        result = parse_drawing_sheets(path, drawing_indices, diag=diag)
         diag.merge(result.diagnostics)
         drawing_sheets_data = result.data
 
-        # Now we know the actual number of drawing sheets parsed
-        if drawing_sheets_data is not None:
-            actual_drawing_pages = drawing_sheets_data.num_sheets
-            logger.info(
-                "drawing_sheets_parsing_completed",
-                sheets_parsed=actual_drawing_pages,
-                errors=len(result.diagnostics.errors),
-                warnings=len(result.diagnostics.warnings),
-            )
-        else:
-            # Parsing failed - use 0 for body parsing offset
-            actual_drawing_pages = 0
-            logger.error(
-                "drawing_sheets_parsing_failed",
-                reason="parse_drawing_sheets returned None",
-                errors=len(result.diagnostics.errors),
-                warnings=len(result.diagnostics.warnings),
-            )
+        logger.info(
+            "drawing_sheets_parsing_completed",
+            sheets_parsed=getattr(drawing_sheets_data, "num_sheets", None),
+            errors=result.diagnostics.num_errors(),
+            warnings=result.diagnostics.num_warnings(),
+        )
     except Exception as e:
         diag.error(
-            "parse.exception", f"Unhandled exception during parsing: {e}", field="parse"
+            "drawing.parse.exception", f"{type(e).__name__}: {e}", field="drawing"
         )
-        logger.error("drawing_sheets_parsing_failed", error=str(e))
-        return IngestionResult(
-            status=IngestStatus.FAILED, data=None, diagnostics=diag, meta={"path": path}
-        )
-
-    # Calculate remaining document for body parsing
-    # Use actual parsed drawing sheets count
-    remaining_doc = doc.subset(
-        pages=range(num_front_pages + actual_drawing_pages, total_pages)
-    )
+        logger.error("drawing_sheets_parsing_failed", error=str(e), exc_info=True)
+        # continue; drawings are optional for body parsing
 
     logger.info(
-        "body_parsing_started",
-        remaining_pages=len(remaining_doc),
+        "body_parsing_started", pages=len(read.body.pages), blocks=len(read.body.blocks)
     )
 
     try:
-        result = parse_patent_body_fallible(doc=remaining_doc)
+        result = parse_patent_body_from_body_result_fallible(body=read.body)
         diag.merge(result.diagnostics)
         patent_body_data = result.data
         logger.info(
             "body_parsing_completed",
-            errors=len(result.diagnostics.errors),
-            warnings=len(result.diagnostics.warnings),
+            errors=result.diagnostics.num_errors(),
+            warnings=result.diagnostics.num_warnings(),
         )
     except Exception as e:
         diag.error(
             "parse.exception", f"Unhandled exception during parsing: {e}", field="parse"
         )
-        logger.error("body_parsing_failed", error=str(e))
+        logger.error("body_parsing_failed", error=str(e), exc_info=True)
         return IngestionResult(
             status=IngestStatus.FAILED, data=None, diagnostics=diag, meta={"path": path}
         )
 
     ingestion_data = IngestionData(
-        front_matter=front_matter_data,
+        front_matter=front_matter,
         drawing_sheets=drawing_sheets_data,
         body=patent_body_data,
     )
 
     meta = {
         "path": path,
-        "front_matter_pages_scanned": front_matter_data.num_sheets,
+        "front_matter_pages_scanned": len(front_matter.pages),
     }
     if drawing_sheets_data is not None:
         meta["drawing_sheets_pages_scanned"] = drawing_sheets_data.num_sheets
@@ -318,13 +305,16 @@ def ingest_patent_pdf(
         meta=meta,
     )
 
+    for each in diag.errors():
+        print(f"ERROR: {each}")
+
     logger.info(
         "ingestion_completed",
         pdf_path=str(path),
         status=result.status.value,
-        total_errors=len(diag.errors),
-        total_warnings=len(diag.warnings),
-        total_info=len(diag.info),
+        total_errors=diag.num_errors(),
+        total_warnings=diag.num_warnings(),
+        total_info=diag.num_info(),
     )
 
     return result

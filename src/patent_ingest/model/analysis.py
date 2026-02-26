@@ -1,7 +1,7 @@
 # patent_ingest/public_api.py
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Dict, List, Literal
+from typing import Dict, List
 import re
 import pymupdf
 
@@ -13,6 +13,8 @@ from patent_ingest.model.stitch import (
 )
 from patent_ingest.model.segment_para import segment_paragraph_blocks
 from patent_ingest.model.model import Block, PageLayout
+from patent_ingest.model.heading_merge import merge_multiline_headings
+from patent_ingest.model.segment_para import ParagraphBlock
 
 PARA_NUM_RE = re.compile(r"^\s*\d{4}\s*[.\)]\s*")
 HEADING_RE = re.compile(r"^[A-Z0-9][A-Z0-9\s\-:,]{3,}$")
@@ -22,16 +24,6 @@ HEADING_RE = re.compile(r"^[A-Z0-9][A-Z0-9\s\-:,]{3,}$")
 class InidResult:
     fields: Dict[int, str]
     pages: List[int]
-
-
-@dataclass(frozen=True)
-class ParagraphBlock:
-    page: int
-    col: Literal["L", "R"]
-    y0: float
-    y1: float
-    kind: Literal["section_heading", "paragraph", "enumerator", "para_marker"]
-    text: str
 
 
 @dataclass(frozen=True)
@@ -127,11 +119,31 @@ def analyze_document(doc: pymupdf.Document) -> DocumentAnalysis:
     #         "body lines",
     #         layouts[i].body["L"].lines + layouts[i].body["R"].lines,
     #     )
-
+    #
     from patent_ingest.model.util import detect_front_matter_pages, smooth_drawing_runs
 
     page_types = detect_front_matter_pages(layouts, page_types)
+    # print("After front matter detection:")
+    # for i, pt in enumerate(page_types):
+    #     print(f"Page {i}: classified as {pt.kind}")
+    # if pt.kind == "unknown":
+    #     print(
+    #         "unknown page",
+    #         i,
+    #         "body lines",
+    #         layouts[i].body["L"].lines + layouts[i].body["R"].lines,
+    #     )
     page_types = smooth_drawing_runs(page_types)
+    # print("After smooth:")
+    # for i, pt in enumerate(page_types):
+    #     print(f"Page {i}: classified as {pt.kind}")
+    # if pt.kind == "unknown":
+    #     print(
+    #         "unknown page",
+    #         i,
+    #         "body lines",
+    #         layouts[i].body["L"].lines + layouts[i].body["R"].lines,
+    #     )
     # for i, pt in enumerate(page_types):
     #     print(f"Page {i}: classified as {pt.kind}")
     #     if pt.kind == "unknown":
@@ -197,6 +209,8 @@ def analyze_document(doc: pymupdf.Document) -> DocumentAnalysis:
                         text=b.text,
                     )
                 )
+
+    body_blocks = merge_multiline_headings(body_blocks)
 
     headings = [b for b in body_blocks if b.kind == "subheading"]
 

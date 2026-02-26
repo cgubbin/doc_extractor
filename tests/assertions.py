@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
+
+from patent_ingest.inid_parse import ParsePolicy, parse_inids
 from tests.normalise import normalise_for_contains
+
 from tests.token_extractors import (
     extract_patent_id_tokens,
     extract_application_id_tokens,
@@ -145,6 +148,7 @@ def assert_analysis_matches_expectations(res: Any, exp: Dict[str, Any]) -> None:
 
     # Optional: tolerate range-based assertions
     drawings_range = exp.get("drawings_range")
+    print(drawings_range)
     if drawings_range:
         lo = drawings_range.get("min")
         hi = drawings_range.get("max")
@@ -192,4 +196,89 @@ def assert_analysis_matches_expectations(res: Any, exp: Dict[str, Any]) -> None:
         want_set = {normalise_for_contains(s) for s in expected_any}
         assert got_set & want_set, (
             f"No expected section heading found. want={sorted(want_set)} got(sample)={sorted(got_set)[:15]}"
+        )
+
+
+def _diag_codes(diag) -> set[str]:
+    return {i.code for i in getattr(diag, "issues", [])}
+
+
+def assert_semantic_inids_against_expectation(res: Any, exp: Dict[str, Any]) -> None:
+    spec = exp.get("semantic")
+    if not spec:
+        return  # semantic checks are optional per fixture
+
+    # Build a policy from existing "required_inids" or the semantic spec itself
+    required = set(int(x) for x in exp.get("required_inids", []))
+    policy = ParsePolicy(
+        require_title=(54 in required),
+        require_abstract=(57 in required),
+        require_pub_id=(10 in required or 12 in required),
+        require_application_id=(21 in required),
+        require_inventors_or_assignee=(73 in required or 75 in required),
+        fail_fast=True,
+    )
+
+    sem = parse_inids(res.inid, policy=policy)
+
+    # ---- tokens ----
+    pub = sem.identification.publication.tokens
+    if "publication_tokens_any" in spec:
+        want = set(spec["publication_tokens_any"])
+        assert pub & want, (
+            f"publication tokens missing any of {sorted(want)}; got={sorted(pub)[:20]}"
+        )
+
+    app = sem.application.application_number.tokens
+    if "application_tokens_any" in spec:
+        want = set(spec["application_tokens_any"])
+        assert app & want, (
+            f"application tokens missing any of {sorted(want)}; got={sorted(app)[:20]}"
+        )
+
+    refs = sem.technical.references.tokens
+    if "references_token_min" in spec:
+        assert len(refs) >= int(spec["references_token_min"]), (
+            f"expected >= {spec['references_token_min']} reference tokens; got={len(refs)}"
+        )
+    if "references_tokens_any" in spec:
+        want = set(spec["references_tokens_any"])
+        assert refs & want, (
+            f"references tokens missing any of {sorted(want)}; got={sorted(refs)[:20]}"
+        )
+
+    # ---- cleaned text ----
+    title = sem.technical.title.text
+    abstract = sem.technical.abstract.text
+    assignee = sem.parties.assignee.text
+
+    for s in spec.get("title_contains", []):
+        assert normalise_for_contains(s) in normalise_for_contains(title)
+
+    for s in spec.get("title_not_contains", []):
+        assert normalise_for_contains(s) not in normalise_for_contains(title)
+
+    for s in spec.get("abstract_contains", []):
+        assert normalise_for_contains(s) in normalise_for_contains(abstract)
+
+    for s in spec.get("abstract_not_contains", []):
+        assert normalise_for_contains(s) not in normalise_for_contains(abstract)
+
+    for s in spec.get("assignee_contains", []):
+        assert normalise_for_contains(s) in normalise_for_contains(assignee)
+
+    for s in spec.get("assignee_not_contains", []):
+        assert normalise_for_contains(s) not in normalise_for_contains(assignee)
+
+    # ---- diagnostics ----
+    diag_spec = spec.get("diagnostics", {})
+    got_codes = _diag_codes(sem.diagnostics)
+
+    for c in diag_spec.get("warn_any", []):
+        assert c in got_codes, (
+            f"expected warning code {c!r} in diagnostics, got={sorted(got_codes)}"
+        )
+    for c in diag_spec.get("info_any", []):
+        assert c in got_codes, (
+            f"expected info code {c!r} in diagnostics, got={sorted(got_codes)}"
         )

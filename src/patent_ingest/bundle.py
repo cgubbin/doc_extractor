@@ -13,17 +13,13 @@ Prompt generation and LLM interaction are handled by external libraries.
 from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterator, Callable, Literal
-import json
+from typing import Iterator, Callable
 
 from patent_ingest.load import (
     PatentDocument,
-    PatentMeta,
-    PatentSections,
     FigureDescription,
-    load_processed_doc,
 )
-from patent_ingest.claims import Claim
+from patent_ingest.body.claims import Claim
 
 
 @dataclass(frozen=True)
@@ -65,8 +61,12 @@ class ClaimContext:
 
     claim: Claim
     parent_claims: list[Claim] = field(default_factory=list)  # Claims this depends on
-    child_claims: list[Claim] = field(default_factory=list)  # Claims that depend on this
-    referenced_figures: list[str] = field(default_factory=list)  # Figure IDs mentioned in claim text
+    child_claims: list[Claim] = field(
+        default_factory=list
+    )  # Claims that depend on this
+    referenced_figures: list[str] = field(
+        default_factory=list
+    )  # Figure IDs mentioned in claim text
 
 
 class EnhancedPatentDocument:
@@ -130,10 +130,7 @@ class EnhancedPatentDocument:
 
     def find_claims_depending_on(self, claim_number: int) -> list[Claim]:
         """Find all claims that directly depend on the given claim."""
-        return [
-            c for c in self.doc.claims
-            if claim_number in c.depends_on
-        ]
+        return [c for c in self.doc.claims if claim_number in c.depends_on]
 
     def get_claim_tree(self, root_claim_number: int) -> dict:
         """Build a dependency tree starting from a root claim.
@@ -149,9 +146,11 @@ class EnhancedPatentDocument:
             children = self.find_claims_depending_on(claim.number)
             return {
                 "claim": claim.number,
-                "text": claim.text[:100] + "..." if len(claim.text) > 100 else claim.text,
+                "text": claim.text[:100] + "..."
+                if len(claim.text) > 100
+                else claim.text,
                 "is_independent": claim.is_independent,
-                "children": [build_tree(child) for child in children]
+                "children": [build_tree(child) for child in children],
             }
 
         return build_tree(root)
@@ -160,7 +159,9 @@ class EnhancedPatentDocument:
         """Get figure by ID (e.g., '3A', '5')."""
         return self._figures_by_id.get(figure_id.upper())
 
-    def search_text(self, query: str, *, case_sensitive: bool = False) -> list[tuple[str, str]]:
+    def search_text(
+        self, query: str, *, case_sensitive: bool = False
+    ) -> list[tuple[str, str]]:
         """Search for text across all sections.
 
         Returns:
@@ -219,7 +220,9 @@ class EnhancedPatentDocument:
 
     # ==================== LLM Grading Context Methods ====================
 
-    def get_figure_context(self, figure_id: str, *, include_claims: bool = True) -> FigureContext | None:
+    def get_figure_context(
+        self, figure_id: str, *, include_claims: bool = True
+    ) -> FigureContext | None:
         """Get a figure with all relevant context for LLM grading.
 
         Args:
@@ -242,7 +245,10 @@ class EnhancedPatentDocument:
         # Look for sheet containing this figure (heuristic: sheet_N.png)
         # TODO: This could be improved with explicit sheet->figure mapping from segmentation
         for png_path in self.doc.sheet_pngs:
-            if f"sheet_{fig.number}" in png_path.lower() or f"sheet{fig.number}" in png_path.lower():
+            if (
+                f"sheet_{fig.number}" in png_path.lower()
+                or f"sheet{fig.number}" in png_path.lower()
+            ):
                 sheet_png = str(Path(self.doc.data_dir) / png_path)
                 break
 
@@ -257,9 +263,10 @@ class EnhancedPatentDocument:
         if include_claims:
             # Search for "FIG. {id}" or "FIGS. ... {id}" in claim text
             import re
+
             fig_pattern = re.compile(
                 rf"\bFIGS?\.?\s+(?:[0-9A-Z,\s\-]+\s+(?:and\s+)?)?{re.escape(fig_id_upper)}\b",
-                re.IGNORECASE
+                re.IGNORECASE,
             )
 
             for claim in self.doc.claims:
@@ -298,10 +305,11 @@ class EnhancedPatentDocument:
 
         # Find referenced figures in claim text
         import re
+
         fig_matches = re.findall(
             r"\bFIGS?\.?\s+([0-9]+[A-Z]?(?:\s*[-,]\s*[0-9]+[A-Z]?)*)",
             claim.text,
-            re.IGNORECASE
+            re.IGNORECASE,
         )
         referenced_figures = []
         for match in fig_matches:
@@ -317,10 +325,7 @@ class EnhancedPatentDocument:
         )
 
     def get_figures_for_grading(
-        self,
-        figure_ids: list[str] | None = None,
-        *,
-        include_claims: bool = True
+        self, figure_ids: list[str] | None = None, *, include_claims: bool = True
     ) -> list[FigureContext]:
         """Get multiple figures with context for batch LLM grading.
 
@@ -399,6 +404,7 @@ class EnhancedPatentDocument:
 
 # ==================== Batch Loading Utilities ====================
 
+
 def load_patent(bundle_dir: str | Path) -> EnhancedPatentDocument:
     """Load a patent bundle with enhanced API.
 
@@ -408,14 +414,14 @@ def load_patent(bundle_dir: str | Path) -> EnhancedPatentDocument:
     Returns:
         EnhancedPatentDocument with query and export methods
     """
-    doc = load_processed_doc(str(bundle_dir))
+    from patent_ingest.load import load_patent as lp
+
+    doc = lp(str(bundle_dir))
     return EnhancedPatentDocument(doc)
 
 
 def load_patents_from_directory(
-    directory: str | Path,
-    *,
-    pattern: str = "*/manifest.json"
+    directory: str | Path, *, pattern: str = "*/manifest.json"
 ) -> Iterator[EnhancedPatentDocument]:
     """Load all patents from a directory.
 
@@ -439,7 +445,7 @@ def load_patents_from_directory(
 
 def filter_patents(
     patents: list[EnhancedPatentDocument],
-    predicate: Callable[[EnhancedPatentDocument], bool]
+    predicate: Callable[[EnhancedPatentDocument], bool],
 ) -> list[EnhancedPatentDocument]:
     """Filter patents based on a predicate function.
 
@@ -455,6 +461,7 @@ def filter_patents(
 
 # ==================== Citation Context Tree Utilities ====================
 
+
 @dataclass(frozen=True)
 class CitationContext:
     """Context about a patent's citations for building citation graphs.
@@ -468,7 +475,9 @@ class CitationContext:
     total_citations: int  # Total number of citations
 
     # For multi-patent analysis (requires loading multiple patents)
-    citing_patents: list[str] = field(default_factory=list)  # Patents that cite this one (forward refs)
+    citing_patents: list[str] = field(
+        default_factory=list
+    )  # Patents that cite this one (forward refs)
 
 
 def build_citation_context(patent: EnhancedPatentDocument) -> CitationContext:
@@ -492,7 +501,9 @@ def build_citation_context(patent: EnhancedPatentDocument) -> CitationContext:
     )
 
 
-def build_citation_graph(patents: list[EnhancedPatentDocument]) -> dict[str, CitationContext]:
+def build_citation_graph(
+    patents: list[EnhancedPatentDocument],
+) -> dict[str, CitationContext]:
     """Build a complete citation graph from multiple patents.
 
     This analyzes all patents together to find both backward and forward citations.
@@ -549,7 +560,7 @@ def find_citation_chain(
     start_patent_id: str,
     end_patent_id: str,
     graph: dict[str, CitationContext],
-    max_depth: int = 5
+    max_depth: int = 5,
 ) -> list[str] | None:
     """Find a citation chain between two patents.
 

@@ -109,5 +109,49 @@
         "BRIEF DESCRIPTION OF THE DRAWINGS",
         "DETAILED DESCRIPTION OF THE PREFERRED",
         "EMBODIMENT"
-    ]
+    ],
+    "semantic": {
+        "publication_tokens_any": [
+            "US7629993B2",
+            "US20040061779A1"
+        ],
+        "application_tokens_any": [
+            "10/262173"
+        ],
+        "title_contains": [
+            "AUTOMATED WAFER DEFECT INSPECTION"
+        ],
+        "title_not_contains": [
+            "(54)"
+        ],
+        "abstract_contains": [
+            "capable of allowing at least Some light to pass through."
+        ],
+        "abstract_not_contains": [
+            "(57)",
+            "ABSTRACT",
+            "Claims",
+            "Drawing Sheets"
+        ],
+        "assignee_contains": [
+            "Rudolph Technologies, Inc., Flanders"
+        ],
+        "assignee_not_contains": [
+            "NOTICE:",
+            "Subject to any disclaimer"
+        ],
+        "references_token_min": 5,
+        "references_tokens_any": [
+            "US3963354A",
+            "US5737072A"
+        ],
+        "diagnostics": {
+            "warn_any": [
+                "inid_parse.inventor_truncated"
+            ],
+            "info_any": [
+                "inid_parse.abstract_tail"
+            ]
+        }
+    }
 }
