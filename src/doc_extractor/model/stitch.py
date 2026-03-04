@@ -5,6 +5,9 @@ from typing import Dict, List, Optional, Tuple
 
 from doc_extractor.model.model import Block, Col, PageLayout
 from doc_extractor.model.classify import classify_page
+from doc_extractor.structured_logger import get_logger
+
+logger = get_logger(__name__)
 
 
 def find_inid_cutoff_page(
@@ -112,7 +115,7 @@ def stitch_inid_blocks_across_pages(
             continue
 
         if page_has_top_inid(cur, top_y_max=top_y_max):
-            print("Current page has top INID; skipping stitch", cur)
+            logger.debug("page_has_top_inid_skipping_stitch", page=p, page_data=str(cur))
             update_last_inids(p)
             continue
         # KEY GATE: if INIDs are re-declared on this page, don't stitch across

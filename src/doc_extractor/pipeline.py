@@ -174,7 +174,10 @@ def ingest_patent_pdf(
             status=IngestStatus.FAILED, data=None, diagnostics=diag, meta={"path": path}
         )
 
-    # TODO; Use the ingestion policy...
+    # Note: IngestPolicy is currently used in determine_status() to control:
+    # - fail_on_error: whether errors result in FAILED vs PARTIAL status
+    # - required_fields: which fields must be present for OK status
+    # Future enhancements could pass policy settings to sub-parsers (INID, body, drawings)
 
     logger.info("front_matter_parsing_started")
 

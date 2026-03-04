@@ -8,6 +8,9 @@ from doc_extractor.body.claims import (
     diff_claims,
     Claim,
 )
+from doc_extractor.structured_logger import get_logger
+
+logger = get_logger(__name__)
 
 
 @dataclass(frozen=True)
@@ -144,7 +147,7 @@ def compare_patent_versions(
         unchanged_threshold,
     )
 
-    print(diffres)
+    logger.info("claims_diff_computed", diff_result=str(diffres))
     # sub_text = Path(submitted.normalized_text_path).read_text(
     #     encoding="utf-8", errors="replace"
     # )

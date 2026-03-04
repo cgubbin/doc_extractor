@@ -89,20 +89,52 @@ class FileSystemSink:
     """Default sink that writes artifacts to a local directory."""
 
     def __init__(self, root_dir: str | Path):
+        """Initialize the filesystem sink with a root directory.
+
+        Args:
+            root_dir: Root directory where artifacts will be written. Created if it doesn't exist.
+        """
         self.root_dir = Path(root_dir)
         self.root_dir.mkdir(parents=True, exist_ok=True)
 
     def _path_for_key(self, key: str) -> Path:
+        """Convert a key to a filesystem path, creating parent directories as needed.
+
+        Args:
+            key: Relative path from root_dir to the target file.
+
+        Returns:
+            Absolute Path object for the key.
+        """
         p = self.root_dir / key
         p.parent.mkdir(parents=True, exist_ok=True)
         return p
 
     def put_bytes(self, key: str, data: bytes, *, content_type: str) -> str:
+        """Write binary data to a file.
+
+        Args:
+            key: Relative path from root_dir.
+            data: Binary data to write.
+            content_type: MIME type of the content (for metadata/logging).
+
+        Returns:
+            Absolute path to the written file as a string.
+        """
         p = self._path_for_key(key)
         p.write_bytes(data)
         return str(p)
 
     def put_json(self, key: str, obj: Any) -> str:
+        """Write a JSON-serializable object to a file.
+
+        Args:
+            key: Relative path from root_dir.
+            obj: JSON-serializable Python object.
+
+        Returns:
+            Absolute path to the written file as a string.
+        """
         p = self._path_for_key(key)
         p.write_text(
             json.dumps(obj, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
@@ -113,6 +145,16 @@ class FileSystemSink:
     def put_text(
         self, key: str, text: str, *, content_type: str = "text/plain; charset=utf-8"
     ) -> str:
+        """Write text to a file.
+
+        Args:
+            key: Relative path from root_dir.
+            text: Text content to write.
+            content_type: MIME type of the content (for metadata/logging).
+
+        Returns:
+            Absolute path to the written file as a string.
+        """
         p = self._path_for_key(key)
         p.write_text(text, encoding="utf-8")
         return str(p)

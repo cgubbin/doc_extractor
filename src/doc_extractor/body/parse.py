@@ -358,9 +358,6 @@ def parse_patent_body_from_body_result(
 
     logger = get_logger(__name__)
 
-    # print(body)
-    # raise NotImplementedError("This function is a placeholder implementation.")
-
     blocks = [b for b in _iter_body_blocks(body) if (b.text or "").strip()]
     logger.info("linearizing blocks", block_count=len(blocks))
     lin = _linearize_blocks(blocks)
