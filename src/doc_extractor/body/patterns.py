@@ -10,6 +10,34 @@ from pypdf import PdfReader
 
 
 # -----------------------------------------------------------------------------
+# Constants for heuristic thresholds
+# -----------------------------------------------------------------------------
+
+# Claim validation
+MIN_CLAIM_LENGTH = 30  # Minimum character length for a valid claim (filters out page numbers)
+
+# Claims search positioning
+CLAIMS_SEARCH_START_RATIO = 0.30  # Start searching for claims anchor from 30% into document
+CLAIMS_TAIL_START_RATIO = 0.60  # Fallback tail search starts at 60% of document
+
+# Minimum document sizes
+MIN_BODY_TEXT_LENGTH = 2000  # Minimum chars in body text to attempt claims extraction
+
+# Claims region detection (tail fallback)
+CLAIMS_WINDOW_SIZE = 25000  # Character window size for evaluating potential claims regions
+MIN_CLAIMS_IN_WINDOW = 5  # Minimum claim markers required in a window
+MAX_CLAIM_OVERRUN_RATIO = 1.2  # Allow 20% overrun vs expected claim count (for OCR errors)
+MAX_CLAIM_OVERRUN_BUFFER = 3  # Additional fixed buffer for claim count overrun
+
+# Scoring weights for tail region detection
+SCORE_WEIGHT_COUNT = 2  # Points per claim marker found
+SCORE_WEIGHT_INCREASE = 2  # Points per increasing transition (e.g., 2→5)
+SCORE_WEIGHT_SEQUENTIAL = 3  # Points per perfectly sequential transition (e.g., 5→6)
+SCORE_PENALTY_BACK_JUMP = 10  # Penalty for large backward jumps (e.g., 20→2)
+BACK_JUMP_THRESHOLD = 3  # Minimum backward jump size to penalize
+
+
+# -----------------------------------------------------------------------------
 # Normalization utilities
 # -----------------------------------------------------------------------------
 
@@ -206,49 +234,61 @@ def _split_sections_by_heading_positions(
 # Claims extraction (anchor-first, tail numbered-list fallback)
 # -----------------------------------------------------------------------------
 
+# Standard claims anchor phrase regex
+# Matches common introductory phrases that precede claim listings:
+# - "what is claimed is:" (most common in US patents)
+# - "the invention claimed is:"
+# - "I/We claim:" or "I claim:" or "We claim:"
+# The optional trailing colon handles both "what is claimed is:" and "what is claimed is"
 _CLAIMS_ANCHOR_RX = re.compile(
     r"\b(the\s+invention\s+claimed\s+is|what\s+is\s+claimed\s+is|i\s*/\s*we\s+claim)\b\s*:?",
     re.IGNORECASE,
 )
 
-# Matches claim starts at:
-# - start of string, OR
-# - after whitespace/newline, but not after letters/digits (avoids "FIG. 1", "claim 1", etc. as much as possible)
-# Requires: "<num>." followed by a space and a capital letter (claims usually start with "A", "The", etc.)
-# Matches claim starts robustly in OCR/PDF extracted text.
-# - Handles normal forms: "1. A ...", "2. The ...", "10) A ..."
-# - Handles common OCR corruption: "15-4 ..." where "." becomes "-4"
-# - Avoids most page/line numbers by requiring claim-like lead words after the marker.
-# Matches claim starts robustly in OCR/PDF extracted text.
-# Key robustness behaviors:
-# - Works when each claim starts on its own line (common in claim listings).
-# - Works when claims are run-on in a single paragraph (e.g., "... . 2. The ... 3. The ...").
-# - Tolerates OCR corruption like "15-4 ..." where "." becomes "-4".
-# - Avoids *most* false positives from line numbers (e.g., "... and 10\nan analyzer ...") by:
-#     * requiring punctuation/dash separators for inline matching, and
-#     * only allowing "dotless" separators at TRUE line starts with capitalized lead words.
+# Claim start marker regex - matches numbered claim beginnings in PDF-extracted text
 #
-# Note: If OCR completely drops a claim number, it cannot be matched; downstream should tolerate gaps.
+# This regex is designed to robustly identify claim starts while avoiding false positives
+# from page numbers, figure references, and paragraph numbers. It uses two branches:
+#
+# Branch 1 (normal claim markers):
+#   - Matches: "1. A method...", "2. The system...", "10) An apparatus..."
+#   - Requires: claim number (1-999) followed by punctuation separator (. ) : or -)
+#   - Lookbehind: avoids matching "claim 1" or "claims 1" (not a claim start)
+#   - Lookahead: requires a letter after separator (claims start with words)
+#   - Handles OCR corruption: "15-4 A..." where "." becomes "-4"
+#
+# Branch 2 (OCR-dropped punctuation at line start):
+#   - Only matches at true line start (^) to avoid inline numbers
+#   - Matches: "1 A method..." (period was dropped by OCR)
+#   - Requires: claim number followed by space and capitalized claim-like word
+#   - Capitalization requirement: avoids "10\nan analyzer" where 10 is a line number
+#   - Only accepts: "A", "An", "The", "Means" (common claim starters)
+#
+# Capture group (1) or (2): the claim number as a string (e.g., "1", "15", "100")
+#
+# Limitations:
+#   - If OCR completely drops a claim number, it cannot be matched
+#   - Downstream code should tolerate gaps in claim numbering
 _CLAIM_START_MARKER_RX = re.compile(
     r"""(?mix)
     (?:  # Branch 1: normal claim markers (inline or line-start), requires a real separator
-        (?:^|(?<=\s))
-        [\'"‘’“”\(\[\{]*\s*
-        (?<!claim\s)(?<!claims\s)
-        (\d{1,3})
+        (?:^|(?<=\s))                           # start of line or after whitespace
+        [\'"''""\(\[\{]*\s*                     # optional opening quotes/brackets
+        (?<!claim\s)(?<!claims\s)               # NOT preceded by "claim " or "claims "
+        (\d{1,3})                               # capture group 1: claim number (1-999)
         \s*
-        (?:[.)]|:|[-–—]\s*\d{0,2})     # separator must be present
+        (?:[.)]|:|[-–—]\s*\d{0,2})              # separator: period, paren, colon, or dash (handles OCR "-4" for ".")
         \s*
-        (?=[\'"‘’“”\(\[\{]?\s*[A-Za-z])  # after separator, allow optional quote/bracket then letter
+        (?=[\'"''""\(\[\{]?\s*[A-Za-z])         # lookahead: optional quote then letter
     )
     |
     (?:  # Branch 2: OCR-dropped punctuation at *true line start* only
-        ^
-        \s*[\'"‘’“”\(\[\{]*\s*
-        (?<!claim\s)(?<!claims\s)
-        (\d{1,3})
-        \s+
-        (?=(?-i:(?:A|An|The|Means)\b))  # require capitalization to avoid matching line-number continuations
+        ^                                       # must be at line start
+        \s*[\'"''""\(\[\{]*\s*                  # optional leading whitespace/quotes
+        (?<!claim\s)(?<!claims\s)               # NOT preceded by "claim " or "claims "
+        (\d{1,3})                               # capture group 2: claim number (1-999)
+        \s+                                     # required whitespace (no punctuation)
+        (?=(?-i:(?:A|An|The|Means)\b))          # lookahead: capitalized claim starter word (case-sensitive)
     )
     """,
     re.MULTILINE | re.IGNORECASE | re.VERBOSE,
@@ -256,13 +296,15 @@ _CLAIM_START_MARKER_RX = re.compile(
 
 
 # Pattern to validate if text looks like a claim
-# Claims typically start with articles or reference other claims
+# Independent claims typically start with articles ("A method", "An apparatus")
+# Dependent claims reference other claims ("The method of claim 1", "Claim 1 further comprising")
+# This pattern matches these common claim structures
 _CLAIM_START_PATTERN = re.compile(
     r"^\d{1,3}\.\s+(?:"
-    r"(?:A|An|The)\s+\w+|"  # "A method", "An apparatus", "The system"
-    r"(?:In|For|As|According\s+to)\s+|"  # "In embodiments", "According to"
-    r"\w+\s+of\s+claim\s+\d+|"  # "The method of claim 1"
-    r"Claim\s+\d+\s+further\s+comprising"  # "Claim 1 further comprising"
+    r"(?:A|An|The)\s+\w+|"                      # Independent: "1. A method", "2. An apparatus", "3. The system"
+    r"(?:In|For|As|According\s+to)\s+|"         # Variations: "In embodiments", "According to claim"
+    r"\w+\s+of\s+claim\s+\d+|"                  # Dependent: "The method of claim 1"
+    r"Claim\s+\d+\s+further\s+comprising"       # Dependent: "Claim 1 further comprising"
     r")",
     re.IGNORECASE,
 )
@@ -272,35 +314,49 @@ def _looks_like_claim(chunk: str) -> bool:
     """
     Heuristic to determine if a text chunk looks like an actual patent claim.
 
-    Returns True if:
-    - Starts with typical claim phrases
-    - Has minimum length (claims are usually substantial)
-    - Doesn't contain obvious non-claim markers
+    This function filters out false positives from _CLAIM_START_MARKER_RX by checking
+    whether the extracted chunk has claim-like characteristics.
+
+    Validation strategy:
+    1. Reject chunks that are too short (< 30 chars) - claims are typically substantial
+    2. Check for explicit claim patterns (articles + nouns, claim references)
+    3. Check for positive indicators (claim vocabulary: "comprising", "wherein", etc.)
+    4. Reject chunks with negative indicators (figure refs, page numbers, section headers)
+
+    Returns:
+        True if the chunk appears to be a genuine patent claim.
+        False if it's likely a false positive (page number, figure reference, etc.)
     """
-    if not chunk or len(chunk) < 30:
+    # Minimum length check: claims are typically substantial
+    # This filters out page numbers like "10. " and figure refs like "15. "
+    if not chunk or len(chunk) < MIN_CLAIM_LENGTH:
         return False
 
-    # Check if it starts with typical claim pattern
+    # Primary validation: does it match explicit claim start patterns?
+    # Matches: "1. A method...", "2. The apparatus of claim 1...", etc.
     if _CLAIM_START_PATTERN.match(chunk):
         return True
 
-    # Check first 100 chars for claim-like language
+    # Secondary validation: check for claim-like vocabulary in the first 100 chars
+    # This catches claims that don't match the explicit pattern but are clearly claims
     prefix = chunk[:100].lower()
 
-    # Positive indicators
+    # Positive indicators: patent claim vocabulary
+    # These words/phrases are common in claims but rare in other parts of patents
     claim_indicators = [
-        r"\ba\s+(?:method|apparatus|system|device|process|composition)",
-        r"\ban\s+(?:apparatus|assembly|element)",
-        r"\bthe\s+(?:method|apparatus|system|device)\s+of\s+claim",
-        r"\bcomprising\b",
-        r"\bwherein\b",
+        r"\ba\s+(?:method|apparatus|system|device|process|composition)",  # Independent claim intros
+        r"\ban\s+(?:apparatus|assembly|element)",                         # Independent claim intros
+        r"\bthe\s+(?:method|apparatus|system|device)\s+of\s+claim",       # Dependent claim refs
+        r"\bcomprising\b",                                                # Transition word (open-ended)
+        r"\bwherein\b",                                                   # Claim limitation introducer
     ]
 
     has_indicator = any(re.search(pat, prefix) for pat in claim_indicators)
 
-    # Negative indicators (things that suggest it's NOT a claim)
+    # Negative indicators: things that suggest it's NOT a claim
+    # These patterns appear in figure references, page numbers, section headers, etc.
     non_claim_markers = [
-        r"\bfig\.",  # Figure references
+        r"\bfig\.",  # Figure references: "FIG. 1", "fig. 2"
         r"\btable\s+\d+",  # Table references
         r"\bpage\s+\d+",  # Page references
         r"\bparagraph\s+\d+",  # Paragraph references
@@ -456,8 +512,8 @@ def _parse_claims_from_block(
                 break
 
         # If expected_count provided and we've exceeded it significantly, stop
-        # Allow some overrun (20%) for OCR errors in front matter
-        if expected_count and len(claims) >= int(expected_count * 1.2) + 3:
+        # Allow some overrun for OCR errors in front matter
+        if expected_count and len(claims) >= int(expected_count * MAX_CLAIM_OVERRUN_RATIO) + MAX_CLAIM_OVERRUN_BUFFER:
             break
 
         claims.append(chunk)
@@ -469,51 +525,82 @@ def _parse_claims_from_block(
 def _find_claims_region_tail(text: str) -> Optional[Tuple[int, int, dict]]:
     """
     Find a plausible claims region in the tail of the document using numbering heuristics.
-    Returns (start_offset, end_offset, diagnostics) or None.
+
+    This is a fallback method used when the anchor phrase ("what is claimed is:") cannot
+    be found. It searches the latter 40% of the document for clusters of numbered items
+    that look like claims based on their numbering pattern.
+
+    Strategy:
+    1. Search only in the tail (last 40% of document) to avoid false positives from
+       numbered section headings in the front matter (e.g., "B2 1. SYSTEM OVERVIEW")
+    2. Evaluate candidate windows starting at each potential claim marker
+    3. Score each window based on:
+       - Density: number of claim markers found (more = better)
+       - Sequentiality: how many consecutive numbers (1→2, 5→6, etc.)
+       - Monotonicity: numbers should generally increase
+       - Back jumps: large backward jumps (20→2) indicate false positives
+    4. Return the window with the highest score
 
     Robustness notes:
-    - OCR often skips numbers (e.g., missing claim 7) or corrupts separators (e.g., "15-4").
-    - Therefore we do NOT require perfectly sequential numbering; we just want a dense cluster
-      of plausible claim starts that is mostly increasing.
+    - OCR often skips numbers (e.g., missing claim 7) or corrupts separators (e.g., "15-4")
+    - We do NOT require perfectly sequential numbering
+    - We just want a dense cluster of mostly-increasing numbers
+
+    Returns:
+        Tuple of (start_offset, end_offset, diagnostics_dict) if found, else None.
+        Offsets are character positions in the original text.
     """
     if not text:
         return None
 
     # Restrict to tail to avoid false positives in headers like "... B2 1. SYSTEM ..."
-    tail_start = int(len(text) * 0.6)
+    # Claims sections are typically at the end of the patent document
+    tail_start = int(len(text) * CLAIMS_TAIL_START_RATIO)
     tail = text[tail_start:]
 
     matches = list(_CLAIM_START_MARKER_RX.finditer(tail))
-    if len(matches) < 2:
+    if len(matches) < 2:  # Need at least 2 potential claims to form a region
         return None
 
+    # Evaluate each potential starting point
     best = None
     best_score = -1
     best_diag: dict = {}
 
     idx_by_pos = [(m.start(), int(m.group(1))) for m in matches]
 
+    # Try each match position as a potential claims region start
     for pos_i, _ in idx_by_pos:
-        window_end = min(len(tail), pos_i + 25000)  # deterministic window size
+        # Fixed window size (typical claim: 200-500 chars, typical patent: 20-50 claims)
+        window_end = min(len(tail), pos_i + CLAIMS_WINDOW_SIZE)
         window = tail[pos_i:window_end]
 
+        # Find all claim-like numbers in this window
         ws = [int(m.group(1)) for m in _CLAIM_START_MARKER_RX.finditer(window)]
-        if len(ws) < 5:
+        if len(ws) < MIN_CLAIMS_IN_WINDOW:  # Too few claims; skip this window
             continue
 
-        inc = 0
-        seq = 0
-        back_jumps = 0
+        # Score this window based on numbering quality
+        inc = 0          # Count of increasing transitions (2→5, 10→11, etc.)
+        seq = 0          # Count of perfectly sequential transitions (1→2, 5→6, etc.)
+        back_jumps = 0   # Count of large backward jumps (20→2, likely false positive)
 
         for a, b in zip(ws, ws[1:]):
             if b > a:
-                inc += 1
+                inc += 1               # Number increased (good)
                 if b == a + 1:
-                    seq += 1
-            elif b < a and (a - b) > 3:
-                back_jumps += 1
+                    seq += 1           # Perfectly sequential (even better)
+            elif b < a and (a - b) > BACK_JUMP_THRESHOLD:
+                back_jumps += 1        # Large backward jump (bad - likely not claims)
 
-        score = (len(ws) * 2) + (inc * 2) + (seq * 3) - (back_jumps * 10)
+        # Scoring heuristic (empirically tuned):
+        # Rewards density, monotonicity, and sequentiality; penalizes false positive patterns
+        score = (
+            (len(ws) * SCORE_WEIGHT_COUNT)
+            + (inc * SCORE_WEIGHT_INCREASE)
+            + (seq * SCORE_WEIGHT_SEQUENTIAL)
+            - (back_jumps * SCORE_PENALTY_BACK_JUMP)
+        )
 
         if score > best_score:
             best_score = score
@@ -642,40 +729,6 @@ def _expand_fig_range(start: str, end: str) -> List[str]:
 
     return [start, end]
 
-
-def _expand_range(start: str, end: str) -> Iterable[str]:
-    if start == end:
-        return [start]
-
-    m1 = re.match(r"(\d+)([A-Z]?)", start)
-    m2 = re.match(r"(\d+)([A-Z]?)", end)
-    if not m1 or not m2:
-        return [start, end]
-
-    n1, s1 = m1.groups()
-    n2, s2 = m2.groups()
-
-    # Only expand letter suffix ranges like 2A-2C; otherwise return endpoints.
-    if n1 != n2 or not s1 or not s2:
-        return [start, end]
-
-    if ord(s2) < ord(s1):
-        return [start, end]
-
-    return [f"{n1}{chr(c)}" for c in range(ord(s1), ord(s2) + 1)]
-
-
-# def _extract_figure_ids(text: str) -> List[str]:
-#     ids: List[str] = []
-#     for m in _FIG_REF_RE.finditer(text):
-#         s = m.group(1)
-#         e = m.group(2)
-#         if e:
-#             ids.extend(_expand_range(s, e))
-#         else:
-#             ids.append(s)
-#     return sorted(set(ids))
-#
 
 # Matches:
 #   FIG. 1 ...

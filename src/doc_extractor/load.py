@@ -148,48 +148,6 @@ def compare_patent_versions(
     )
 
     logger.info("claims_diff_computed", diff_result=str(diffres))
-    # sub_text = Path(submitted.normalized_text_path).read_text(
-    #     encoding="utf-8", errors="replace"
-    # )
-    # app_text = Path(approved.normalized_text_path).read_text(
-    #     encoding="utf-8", errors="replace"
-    # )
-    #
-    # sub_ex = extract_relevant_excerpts(
-    #     sub_text,
-    #     diffres,
-    #     "submitted",
-    #     excerpt_window_chars,
-    #     max_excerpts_per_section,
-    # )
-    # app_ex = extract_relevant_excerpts(
-    #     app_text,
-    #     diffres,
-    #     "approved",
-    #     excerpt_window_chars,
-    #     max_excerpts_per_section,
-    # )
-    #
-    # bundle = {
-    #     "submitted_doc_id": submitted.doc_id,
-    #     "approved_doc_id": approved.doc_id,
-    #     "claims_diff": {
-    #         "summary": diffres.summary,
-    #         "alignments": [a.__dict__ for a in diffres.alignments],
-    #         "warnings": [w.__dict__ for w in diffres.warnings],
-    #     },
-    #     "relevant_excerpts": {
-    #         "submitted": [e.__dict__ for e in sub_ex],
-    #         "approved": [e.__dict__ for e in app_ex],
-    #     },
-    # }
-    # (meta_dir / "claims_diff.json").write_text(
-    #     json.dumps(bundle["claims_diff"], indent=2), encoding="utf-8"
-    # )
-    # (meta_dir / "relevant_excerpts.json").write_text(
-    #     json.dumps(bundle["relevant_excerpts"], indent=2), encoding="utf-8"
-    # )
-    # (meta_dir / "comparison_bundle.json").write_text(
-    #     json.dumps(bundle, indent=2), encoding="utf-8"
-    # )
-    # return bundle
+
+    # TODO: Implement full comparison bundle generation with excerpts
+    return diffres

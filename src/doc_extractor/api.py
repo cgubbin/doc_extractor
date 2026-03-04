@@ -167,26 +167,64 @@ class MemorySink:
     """
 
     def __init__(self):
+        """Initialize an in-memory sink with empty storage dictionaries."""
         self.blobs: dict[str, bytes] = {}
         self.json_objects: dict[str, Any] = {}
         self.texts: dict[str, str] = {}
 
     def put_bytes(self, key: str, data: bytes, *, content_type: str) -> str:
+        """Store binary data in memory.
+
+        Args:
+            key: Identifier for the data.
+            data: Binary data to store.
+            content_type: MIME type of the content (for metadata/logging).
+
+        Returns:
+            The key as the URI.
+        """
         self.blobs[key] = data
         return key
 
     def put_json(self, key: str, obj: Any) -> str:
+        """Store a JSON-serializable object in memory.
+
+        Args:
+            key: Identifier for the object.
+            obj: JSON-serializable Python object.
+
+        Returns:
+            The key as the URI.
+        """
         self.json_objects[key] = obj
         return key
 
     def put_text(
         self, key: str, text: str, *, content_type: str = "text/plain; charset=utf-8"
     ) -> str:
+        """Store text in memory.
+
+        Args:
+            key: Identifier for the text.
+            text: Text content to store.
+            content_type: MIME type of the content (for metadata/logging).
+
+        Returns:
+            The key as the URI.
+        """
         self.texts[key] = text
         return key
 
 
 def _sha256(data: bytes) -> str:
+    """Compute SHA256 hash of binary data.
+
+    Args:
+        data: Binary data to hash.
+
+    Returns:
+        Hexadecimal string representation of the SHA256 hash.
+    """
     h = hashlib.sha256()
     h.update(data)
     return h.hexdigest()

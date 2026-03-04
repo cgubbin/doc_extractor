@@ -203,23 +203,5 @@ def build_document_inid_dict(
         )
         pages_blocks.append(blocks)
 
-    # 4) Stitch only within front-matter window
-    # stitched_pages = stitch_inid_blocks_across_pages(pages_blocks, top_y_max=220.0)
-
-    # 5) Build final INID dict
+    # 4) Build final INID dict
     return build_inid_dict(pages_blocks)
-
-
-if __name__ == "__main__":
-    doc = pymupdf.open("/Users/kit/Repos/patent_crawler/data/pdfs/US20110054659A1.pdf")
-    inids = build_document_inid_dict(doc)
-
-    for k, v in inids.items():
-        print("INID:", k, v)
-
-    # title = inids.get(54)
-    # print("Title:", title)
-    # abstract = inids.get(57)
-    # print("Abstract:", abstract)
-    # priority = inids.get(60)
-    # print("Priority:", priority)
