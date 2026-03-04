@@ -1,11 +1,11 @@
-"""Common utilities shared across patent_ingest modules.
+"""Common utilities shared across doc_extractor modules.
 
 This package contains consolidated utility functions, patterns, and configurations
 that were previously duplicated across multiple modules.
 """
 
 # Re-export commonly used utilities for convenience
-from patent_ingest.common.text_utils import (
+from doc_extractor.common.text_utils import (
     normalize_whitespace,
     normalize_whitespace_basic,
     normalize_punctuation_spacing,
@@ -16,14 +16,14 @@ from patent_ingest.common.text_utils import (
 )
 
 
-from patent_ingest.common.config import (
+from doc_extractor.common.config import (
     SegmentationConfig,
     ParsingConfig,
     DEFAULT_SEGMENTATION_CONFIG,
     DEFAULT_PARSING_CONFIG,
 )
 
-# patterns module should be imported as: from patent_ingest.common import patterns
+# patterns module should be imported as: from doc_extractor.common import patterns
 
 __all__ = [
     # text_utils

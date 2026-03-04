@@ -1,4 +1,4 @@
-# patent_ingest/common/section_rules.py
+# doc_extractor/common/section_rules.py
 """
 Single source of truth for patent section heading recognition.
 
@@ -10,6 +10,7 @@ OCR tolerance is automatic: _alias_to_pattern() builds anchored regexes
 that accept flexible whitespace/hyphen separators between tokens and
 optional trailing punctuation (semicolon, colon, period, comma).
 """
+
 from __future__ import annotations
 
 import re
@@ -17,7 +18,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
 
-from patent_ingest.common.text_utils import normalize_for_matching
+from doc_extractor.common.text_utils import normalize_for_matching
 
 
 class SectionKey(str, Enum):
@@ -46,7 +47,7 @@ def _norm_heading_text(s: str) -> str:
     s = (s or "").strip()
     if not s:
         return ""
-    s = normalize_for_matching(s)          # NFKC, casefold, punct/ws cleanup
+    s = normalize_for_matching(s)  # NFKC, casefold, punct/ws cleanup
     s = re.sub(r"[\u2013\u2014\u2212]", "-", s)  # en-dash, em-dash, minus → hyphen
     s = re.sub(r"\s+", " ", s).strip()
     return s.upper()

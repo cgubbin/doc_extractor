@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, Optional, Set, Dict, List
 from pydantic import BaseModel, ConfigDict, Field
 
-from patent_ingest.diagnostics import Diagnostics, _canon_diagnostics
+from doc_extractor.diagnostics import Diagnostics, _canon_diagnostics
 
 
 class TokenField(BaseModel):
@@ -64,8 +64,8 @@ class Technical(BaseModel):
     uscl: TokenField = Field(default_factory=TokenField)
     references: TokenField = Field(default_factory=TokenField)  # (56) patent-id tokens
     field_of_search: TokenField = Field(default_factory=TokenField)
-    claims_count: int | None
-    drawing_sheets_count: int | None
+    claims_count: int | None = None
+    drawing_sheets_count: int | None = None
 
 
 class Parties(BaseModel):
@@ -96,7 +96,9 @@ class ParsedFrontMatterV1(BaseModel):
             "pages": list(self.pages),
             "identification": {
                 "publication": _canon_token_field(self.identification.publication),
-                "prior_publication": _canon_token_field(self.identification.prior_publication),
+                "prior_publication": _canon_token_field(
+                    self.identification.prior_publication
+                ),
             },
             "application": {
                 "application_number": _canon_token_field(

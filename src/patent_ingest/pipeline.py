@@ -1,5 +1,5 @@
 """
-patent_ingest.pipeline
+doc_extractor.pipeline
 
 Orchestration layer that runs:
   1) Front-matter parsing (multi-page)
@@ -9,10 +9,10 @@ This module is intentionally lightweight: it wires together existing modules and
 standardizes return structure and QA aggregation.
 
 Expected existing functions (from your codebase):
-  - patent_ingest.parse_front_page.parse_front_matter(pages_text: list[str], max_pages: int) -> dict
-  - patent_ingest.parse_front_page.extract_page_text(reader, page_index: int, is_front_page: bool = False) -> str
+  - doc_extractor.parse_front_page.parse_front_matter(pages_text: list[str], max_pages: int) -> dict
+  - doc_extractor.parse_front_page.extract_page_text(reader, page_index: int, is_front_page: bool = False) -> str
     OR equivalent helper you already use to build pages_text.
-  - patent_ingest.drawing_sheets.process_drawing_sheets(pdf_path: str, front_matter: dict, ...) -> dict
+  - doc_extractor.drawing_sheets.process_drawing_sheets(pdf_path: str, front_matter: dict, ...) -> dict
   - Optional: canonical helpers (canonical_front_page, canonical_drawing_sheets)
 
 If your parse_front_matter signature or helper names differ, update the imports
@@ -30,20 +30,20 @@ import pymupdf
 
 # --- Imports from your existing modules ---
 # Adjust these import paths if your package structure differs.
-from patent_ingest.inid_parse import (
+from doc_extractor.inid_parse import (
     parse_inids,
     ParsePolicy,
     ParsedFrontMatterV1,
     MissingRequiredINIDs,
 )
-from patent_ingest.body.parse import (
+from doc_extractor.body.parse import (
     parse_patent_body_from_body_result_fallible,
     PatentBodyData,
 )
-from patent_ingest.drawing_sheets.model import parse_drawing_sheets, DrawingSheetsData
-from patent_ingest.model.analysis import analyze_document
-from patent_ingest.diagnostics import Diagnostics
-from patent_ingest.structured_logger import get_logger
+from doc_extractor.drawing_sheets.model import parse_drawing_sheets, DrawingSheetsData
+from doc_extractor.model.analysis import analyze_document
+from doc_extractor.diagnostics import Diagnostics
+from doc_extractor.structured_logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -61,6 +61,7 @@ class OrchestratorConfig:
     export_pdf: bool = True
     export_png: bool = True
     segment_drawings: bool = True
+    fail_on_missing_inid: bool = False
 
 
 class IngestStatus(str, Enum):
@@ -190,25 +191,44 @@ def ingest_patent_pdf(
         )
     except MissingRequiredINIDs as e:
         # known/expected quality failure
-        diag.merge(e.diagnostics)
         diag.error("front_matter.missing_required", str(e), field="front_matter")
-        logger.info(
-            "front_matter_parsing_incomplete", missing=getattr(e, "missing", None)
+        logger.warning(
+            "front_matter_parsing_incomplete",
+            missing=getattr(e, "missing", None),
+            continuing=not config.fail_on_missing_inid,
         )
-        return IngestionResult(
-            status=IngestStatus.FAILED, data=None, diagnostics=diag, meta={"path": path}
-        )
+
+        if config.fail_on_missing_inid:
+            return IngestionResult(
+                status=IngestStatus.FAILED,
+                data=None,
+                diagnostics=diag,
+                meta={"path": path},
+            )
+
+        # Create empty front_matter to allow body/figures extraction to continue
+        front_matter = ParsedFrontMatterV1()
+        logger.info("continuing_without_front_matter", reason="missing_required_inids")
     except Exception as e:
         diag.error(
-            "parse.exception",
-            f"Unhandled exception during parsing: {type(e).__name__}: {e}",
-            field="parse",
+            "front_matter.parse.exception",
+            f"Unhandled exception during front matter parsing: {type(e).__name__}: {e}",
+            field="front_matter",
             exc_type=type(e).__name__,
         )
         logger.error("front_matter_parsing_failed", error=str(e), exc_info=True)
-        return IngestionResult(
-            status=IngestStatus.FAILED, data=None, diagnostics=diag, meta={"path": path}
-        )
+
+        if config.fail_on_missing_inid:
+            return IngestionResult(
+                status=IngestStatus.FAILED,
+                data=None,
+                diagnostics=diag,
+                meta={"path": path},
+            )
+
+        # Create empty front_matter to allow body/figures extraction to continue
+        front_matter = ParsedFrontMatterV1()
+        logger.info("continuing_without_front_matter", reason="parse_exception")
 
     # drawing pages: trust detection, treat reported count as a check
     num_drawing_pages = read.drawings.count
@@ -264,8 +284,16 @@ def ingest_patent_pdf(
         "body_parsing_started", pages=len(read.body.pages), blocks=len(read.body.blocks)
     )
 
+    # Extract expected counts from front matter for validation
+    expected_claims = getattr(front_matter.technical, "claims_count", None)
+    expected_drawings = getattr(front_matter.technical, "drawing_sheets_count", None)
+
     try:
-        result = parse_patent_body_from_body_result_fallible(body=read.body)
+        result = parse_patent_body_from_body_result_fallible(
+            body=read.body,
+            expected_claim_count=expected_claims,
+            expected_drawing_count=expected_drawings,
+        )
         diag.merge(result.diagnostics)
         patent_body_data = result.data
         logger.info(

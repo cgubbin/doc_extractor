@@ -4,7 +4,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from patent_ingest.common import patterns
+from doc_extractor.common import patterns
+from doc_extractor.diagnostics import Diagnostics
 
 
 # ============================================================
@@ -613,8 +614,6 @@ def _detect_figures_from_ocr(
 # ============================================================
 # Main entry point
 # ============================================================
-
-from patent_ingest.diagnostics import Diagnostics
 
 
 @dataclass(frozen=True)

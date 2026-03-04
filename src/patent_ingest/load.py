@@ -3,7 +3,7 @@ from pathlib import Path
 import json
 from typing import Any
 
-from patent_ingest.body.claims import (
+from doc_extractor.body.claims import (
     align_claims,
     diff_claims,
     Claim,

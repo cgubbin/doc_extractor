@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import List, Sequence
 
-from patent_ingest.model.segment_para import ParagraphBlock
+from doc_extractor.model.segment_para import ParagraphBlock
 
 
 _ALL_CAPSISH = re.compile(r"^[^a-z]*$")  # no lowercase letters

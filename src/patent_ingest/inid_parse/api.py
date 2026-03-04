@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from patent_ingest.diagnostics import Diagnostics
-from patent_ingest.structured_logger import get_logger
-from patent_ingest.model.analysis import InidResult
+from doc_extractor.diagnostics import Diagnostics
+from doc_extractor.structured_logger import get_logger
+from doc_extractor.model.analysis import InidResult
 
 from .registry import ParsePolicy
 from .parser import ParsedFrontMatter, parse_front_matter

@@ -1,11 +1,11 @@
-"""CLI entry point for patent_ingest.
+"""CLI entry point for doc_extractor.
 
 Parse patent PDFs (front matter, drawings, body) and optionally export artifacts.
 
 Examples:
-    python -m patent_ingest corpus/US10935501B2.pdf --print-json
-    python -m patent_ingest corpus/US10935501B2.pdf --print-canonical-front-json
-    python -m patent_ingest corpus/US10935501B2.pdf --export-artifacts --export-dir out/
+    python -m doc_extractor corpus/US10935501B2.pdf --print-json
+    python -m doc_extractor corpus/US10935501B2.pdf --print-canonical-front-json
+    python -m doc_extractor corpus/US10935501B2.pdf --export-artifacts --export-dir out/
 """
 
 
@@ -14,19 +14,19 @@ def main(argv: list[str] | None = None) -> int:
     import sys
     from pathlib import Path
 
-    from patent_ingest.pipeline import IngestStatus
-    from patent_ingest.api import (
+    from doc_extractor.pipeline import IngestStatus
+    from doc_extractor.api import (
         FileSystemSink,
         export_artifacts,
         ExportSpec,
         parse_patent,
     )
-    from patent_ingest.structured_logger import get_logger
+    from doc_extractor.structured_logger import get_logger
 
     logger = get_logger(__name__)
 
     parser = argparse.ArgumentParser(
-        prog="patent_ingest",
+        prog="doc_extractor",
         description="Parse patent PDFs (front matter, drawings, body) and optionally export artifacts.",
     )
 
@@ -141,7 +141,7 @@ def main(argv: list[str] | None = None) -> int:
         raise e
 
     if result.ingested.status == IngestStatus.FAILED:
-        from patent_ingest.diagnostics import summarize_diagnostics
+        from doc_extractor.diagnostics import summarize_diagnostics
 
         raise RuntimeError(
             f"Patent ingest failed: {summarize_diagnostics(result.ingested.diagnostics)}"
@@ -151,40 +151,6 @@ def main(argv: list[str] | None = None) -> int:
     if data is None:
         raise RuntimeError("Patent ingest data empty")
 
-    # ------------------------
-    # Canonical front JSON
-    # ------------------------
-    # front = data.front_matter
-    # canonical = front.canonical()
-    # #
-    # if args.canonical_front_json is not None:
-    #     args.canonical_front_json.parent.mkdir(parents=True, exist_ok=True)
-    #     args.canonical_front_json.write_text(
-    #         json.dumps(canonical, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-    #         encoding="utf-8",
-    #     )
-    # #
-    # if args.print_canonical_front_json:
-    #     sys.stdout.write(
-    #         json.dumps(canonical, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
-    #     )
-    #
-    # # ------------------------
-    # # Full parsed JSON
-    # # ------------------------
-    # dump_kwargs = (
-    #     {"ensure_ascii": False, "separators": (",", ":"), "sort_keys": True}
-    #     if args.compact
-    #     else {"ensure_ascii": False, "indent": 2, "sort_keys": True}
-    # )
-    #
-    # if args.json is not None:
-    #     args.json.parent.mkdir(parents=True, exist_ok=True)
-    #     args.json.write_text(json.dumps(result, **dump_kwargs) + "\n", encoding="utf-8")
-    #
-    # if args.print_json:
-    #     sys.stdout.write(json.dumps(result, **dump_kwargs) + "\n")
-    #
     # ------------------------
     # Optional artifact export
     # ------------------------

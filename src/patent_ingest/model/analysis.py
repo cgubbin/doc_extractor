@@ -1,20 +1,20 @@
-# patent_ingest/public_api.py
+# doc_extractor/public_api.py
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, List
 import re
 import pymupdf
 
-from patent_ingest.model.pipeline import build_page_layout, segment_page_blocks
-from patent_ingest.model.classify import classify_page
-from patent_ingest.model.stitch import (
+from doc_extractor.model.pipeline import build_page_layout, segment_page_blocks
+from doc_extractor.model.classify import classify_page
+from doc_extractor.model.stitch import (
     find_inid_cutoff_page,
     build_inid_dict,
 )
-from patent_ingest.model.segment_para import segment_paragraph_blocks
-from patent_ingest.model.model import Block, PageLayout
-from patent_ingest.model.heading_merge import merge_multiline_headings
-from patent_ingest.model.segment_para import ParagraphBlock
+from doc_extractor.model.segment_para import segment_paragraph_blocks
+from doc_extractor.model.model import Block, PageLayout
+from doc_extractor.model.heading_merge import merge_multiline_headings
+from doc_extractor.model.segment_para import ParagraphBlock
 
 PARA_NUM_RE = re.compile(r"^\s*\d{4}\s*[.\)]\s*")
 HEADING_RE = re.compile(r"^[A-Z0-9][A-Z0-9\s\-:,]{3,}$")
@@ -120,7 +120,7 @@ def analyze_document(doc: pymupdf.Document) -> DocumentAnalysis:
     #         layouts[i].body["L"].lines + layouts[i].body["R"].lines,
     #     )
     #
-    from patent_ingest.model.util import detect_front_matter_pages, smooth_drawing_runs
+    from doc_extractor.model.util import detect_front_matter_pages, smooth_drawing_runs
 
     page_types = detect_front_matter_pages(layouts, page_types)
     # print("After front matter detection:")

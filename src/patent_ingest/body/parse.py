@@ -4,12 +4,12 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
-from patent_ingest.body.claims import Claim, claims_from_chunks, validate_claims
-from patent_ingest.diagnostics import Diagnostics
-from patent_ingest.model.analysis import BodyResult
+from doc_extractor.body.claims import Claim, claims_from_chunks, validate_claims
+from doc_extractor.diagnostics import Diagnostics
+from doc_extractor.model.analysis import BodyResult
 
-from patent_ingest.body.headings import normalize_section_heading
-from patent_ingest.body.patterns import (
+from doc_extractor.body.headings import normalize_section_heading
+from doc_extractor.body.patterns import (
     extract_drawing_descriptions,
     _extract_figure_ids,
     # _find_claims_start_offset,
@@ -251,6 +251,12 @@ _CLAIM_MARKER_RX = re.compile(
     r"(?=[A-Z(])",  # next token usually starts with capital or "("
 )
 
+# Standard claims anchor phrase (most reliable)
+_CLAIMS_ANCHOR_RX = re.compile(
+    r"\b(what\s+is\s+claimed\s+is|the\s+invention\s+claimed\s+is|i\s*/\s*we\s+claim)\b\s*:?",
+    re.IGNORECASE,
+)
+
 # Optional: typical pre-claims phrase
 _PRECLAIMS_HINT_RX = re.compile(
     r"\blimited\s+only\s+by\s+the\s+claims\b", re.IGNORECASE
@@ -263,6 +269,14 @@ def find_claims_start_offset(body_text: str) -> Optional[int]:
 
     text = body_text
 
+    # FIRST: Check for standard claims anchor phrase (most reliable)
+    # Search from 30% onwards (claims usually in latter half)
+    search_from = int(len(text) * 0.30)
+    anchor_match = _CLAIMS_ANCHOR_RX.search(text, search_from)
+    if anchor_match:
+        return anchor_match.end()  # Start after the anchor phrase
+
+    # FALLBACK: Search for numbered list pattern
     # Search window: bias toward end (claims usually late)
     start_search_at = int(len(text) * 0.40)
     hay = text[start_search_at:]
@@ -308,12 +322,8 @@ def _extract_claims_block(
     if "claims" in sections and sections["claims"].strip():
         return sections["claims"], "section"
 
-    print("Fallback: trying to find claims block by anchor in body text.")
-    print(body_text)
     start = find_claims_start_offset(body_text)
-    # print(body_text)
     if start is not None:
-        # print("Found claims start at offset", start)
         return body_text[start:].strip(), "anchor"
 
     diag.warn(
@@ -343,8 +353,8 @@ def parse_patent_body_from_body_result(
     We assume blocks are already in reading order and already split into
     heading/subheading/paragraph kinds.
     """
-    from patent_ingest.common import normalize_punctuation_spacing
-    from patent_ingest.structured_logger import get_logger
+    from doc_extractor.common import normalize_punctuation_spacing
+    from doc_extractor.structured_logger import get_logger
 
     logger = get_logger(__name__)
 
@@ -396,7 +406,7 @@ def parse_patent_body_from_body_result(
 
     # Claims: prefer explicit claims section; else anchor
     claims_block, claims_method = _extract_claims_block(body_text, sections, diag)
-    chunks = _parse_claims_from_block(claims_block)
+    chunks = _parse_claims_from_block(claims_block, expected_count=expected_claim_count)
     claims = claims_from_chunks(chunks)
     # if expected_claim_count is not None:
     # claims = claims[:expected_claim_count]  # allow some overrun for warnings

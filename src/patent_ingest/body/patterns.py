@@ -215,13 +215,101 @@ _CLAIMS_ANCHOR_RX = re.compile(
 # - start of string, OR
 # - after whitespace/newline, but not after letters/digits (avoids "FIG. 1", "claim 1", etc. as much as possible)
 # Requires: "<num>." followed by a space and a capital letter (claims usually start with "A", "The", etc.)
+# Matches claim starts robustly in OCR/PDF extracted text.
+# - Handles normal forms: "1. A ...", "2. The ...", "10) A ..."
+# - Handles common OCR corruption: "15-4 ..." where "." becomes "-4"
+# - Avoids most page/line numbers by requiring claim-like lead words after the marker.
+# Matches claim starts robustly in OCR/PDF extracted text.
+# Key robustness behaviors:
+# - Works when each claim starts on its own line (common in claim listings).
+# - Works when claims are run-on in a single paragraph (e.g., "... . 2. The ... 3. The ...").
+# - Tolerates OCR corruption like "15-4 ..." where "." becomes "-4".
+# - Avoids *most* false positives from line numbers (e.g., "... and 10\nan analyzer ...") by:
+#     * requiring punctuation/dash separators for inline matching, and
+#     * only allowing "dotless" separators at TRUE line starts with capitalized lead words.
+#
+# Note: If OCR completely drops a claim number, it cannot be matched; downstream should tolerate gaps.
 _CLAIM_START_MARKER_RX = re.compile(
-    r"(?:^|(?<=\s))"  # start or whitespace boundary
-    r"(?<![A-Za-z0-9])"  # not immediately preceded by alnum
-    r"(\d{1,3})\s*\.\s+"  # N. (claim number)
-    r"(?=[A-Z])",  # next char likely starts a sentence/claim
-    re.MULTILINE,
+    r"""(?mix)
+    (?:  # Branch 1: normal claim markers (inline or line-start), requires a real separator
+        (?:^|(?<=\s))
+        [\'"‘’“”\(\[\{]*\s*
+        (?<!claim\s)(?<!claims\s)
+        (\d{1,3})
+        \s*
+        (?:[.)]|:|[-–—]\s*\d{0,2})     # separator must be present
+        \s*
+        (?=[\'"‘’“”\(\[\{]?\s*[A-Za-z])  # after separator, allow optional quote/bracket then letter
+    )
+    |
+    (?:  # Branch 2: OCR-dropped punctuation at *true line start* only
+        ^
+        \s*[\'"‘’“”\(\[\{]*\s*
+        (?<!claim\s)(?<!claims\s)
+        (\d{1,3})
+        \s+
+        (?=(?-i:(?:A|An|The|Means)\b))  # require capitalization to avoid matching line-number continuations
+    )
+    """,
+    re.MULTILINE | re.IGNORECASE | re.VERBOSE,
 )
+
+
+# Pattern to validate if text looks like a claim
+# Claims typically start with articles or reference other claims
+_CLAIM_START_PATTERN = re.compile(
+    r"^\d{1,3}\.\s+(?:"
+    r"(?:A|An|The)\s+\w+|"  # "A method", "An apparatus", "The system"
+    r"(?:In|For|As|According\s+to)\s+|"  # "In embodiments", "According to"
+    r"\w+\s+of\s+claim\s+\d+|"  # "The method of claim 1"
+    r"Claim\s+\d+\s+further\s+comprising"  # "Claim 1 further comprising"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def _looks_like_claim(chunk: str) -> bool:
+    """
+    Heuristic to determine if a text chunk looks like an actual patent claim.
+
+    Returns True if:
+    - Starts with typical claim phrases
+    - Has minimum length (claims are usually substantial)
+    - Doesn't contain obvious non-claim markers
+    """
+    if not chunk or len(chunk) < 30:
+        return False
+
+    # Check if it starts with typical claim pattern
+    if _CLAIM_START_PATTERN.match(chunk):
+        return True
+
+    # Check first 100 chars for claim-like language
+    prefix = chunk[:100].lower()
+
+    # Positive indicators
+    claim_indicators = [
+        r"\ba\s+(?:method|apparatus|system|device|process|composition)",
+        r"\ban\s+(?:apparatus|assembly|element)",
+        r"\bthe\s+(?:method|apparatus|system|device)\s+of\s+claim",
+        r"\bcomprising\b",
+        r"\bwherein\b",
+    ]
+
+    has_indicator = any(re.search(pat, prefix) for pat in claim_indicators)
+
+    # Negative indicators (things that suggest it's NOT a claim)
+    non_claim_markers = [
+        r"\bfig\.",  # Figure references
+        r"\btable\s+\d+",  # Table references
+        r"\bpage\s+\d+",  # Page references
+        r"\bparagraph\s+\d+",  # Paragraph references
+        r"^\d+\.\s+(?:background|summary|description|embodiment)",  # Section headers
+    ]
+
+    has_non_marker = any(re.search(pat, prefix) for pat in non_claim_markers)
+
+    return has_indicator and not has_non_marker
 
 
 def _find_claims_start_offset(body_text: str) -> Optional[int]:
@@ -239,37 +327,154 @@ def _find_claims_start_offset(body_text: str) -> Optional[int]:
     return None
 
 
-def _parse_claims_from_block(block: str) -> List[str]:
+_END_MARKERS_RX = re.compile(
+    r"\b(?:"
+    r"ABSTRACT\s+OF\s+THE\s+(?:DISCLOSURE|INVENTION)|"
+    r"END\s+OF\s+CLAIMS|"
+    r"WHAT\s+IS\s+CLAIMED\s+ABOVE"
+    r")\b",
+    re.IGNORECASE,
+)
+
+_ALL_CAPS_HEADER_RX = re.compile(
+    r"^(?!.*[a-z])[A-Z\s]{20,}$",  # no lowercase allowed
+    re.MULTILINE,
+)
+
+_ASTERISK_SEP_RX = re.compile(
+    r"^\s*(?:\*\s*){3,}$",  # "***" or "* * *" etc.
+    re.MULTILINE,
+)
+
+
+def _find_claims_end_offset(block: str, start_offset: int = 0) -> Optional[int]:
+    """
+    Best-effort claims end detection.
+
+    Robustness notes:
+    - OCR/PDF extraction often skips claim numbers or corrupts separators (e.g., "15-4" for "15.").
+      Therefore we do NOT treat skipped numbers as an end-of-claims signal.
+    - We only stop early on explicit end markers / structural separators, or a clear numbering restart.
+    """
+    if not block:
+        return None
+
+    # check the explicit markers (case-insensitive)
+    m = _END_MARKERS_RX.search(block, start_offset)
+    if m:
+        # print("Found end of claims marker:", m.group(0), "at offset", m.start())
+        return m.start()
+
+    # check separators / all-caps headers (case-sensitive / structural)
+    m = _ASTERISK_SEP_RX.search(block, start_offset)
+    if m:
+        # print("Found end of claims marker:", m.group(0), "at offset", m.start())
+        return m.start()
+
+    m = _ALL_CAPS_HEADER_RX.search(block, start_offset)
+    if m:
+        # print("Found end of claims marker:", m.group(0), "at offset", m.start())
+        return m.start()
+
+    # Numbering-based heuristic (tolerant to skips)
+    matches = list(_CLAIM_START_MARKER_RX.finditer(block, start_offset))
+    if len(matches) < 2:
+        return None
+    claim_numbers = [int(m.group(1)) for m in matches]
+    # print("Claim numbers detected for end detection:", claim_numbers[:20])
+
+    for i in range(1, len(claim_numbers)):
+        prev_num = claim_numbers[i - 1]
+        curr_num = claim_numbers[i]
+
+        # Restart or large backward jump (e.g., 20 -> 1, or 15 -> 2)
+        if curr_num < prev_num and (prev_num - curr_num) > 3:
+            return matches[i].start()
+
+    return None
+
+
+def _parse_claims_from_block(
+    block: str, expected_count: Optional[int] = None
+) -> List[str]:
     if not block:
         return []
+
+    # print("Parsing claims block of length", len(block))
+    # print("Block preview:", block)
+
+    # Detect end of claims section
+    claims_end = _find_claims_end_offset(block)
+    if claims_end is not None:
+        block = block[:claims_end]
+
+    # print("Trimmed claims block length after end detection:", len(block))
 
     starts = list(_CLAIM_START_MARKER_RX.finditer(block))
     if not starts:
         return []
 
     claims: List[str] = []
+    claim_numbers: List[int] = []
+
     for i, m in enumerate(starts):
-        claim_num = m.group(1)
-        start_pos = m.start(1)  # start at the number
+        claim_num_str = m.group(1)
+        claim_num = int(claim_num_str)
+
+        # Slice from the NUMBER start (group(1)) to the next NUMBER start
+        start_pos = m.start(1)
         end_pos = starts[i + 1].start(1) if i + 1 < len(starts) else len(block)
         chunk = block[start_pos:end_pos].strip()
+
+        # print(f"Found claim {claim_num} at offset {start_pos}, chunk preview: {chunk}")
 
         # Deterministic whitespace normalization inside each claim
         chunk = re.sub(r"\s+", " ", chunk).strip()
 
-        # Ensure "<n>." prefix is present
-        if not re.match(rf"^{re.escape(claim_num)}\s*\.", chunk):
-            chunk = f"{claim_num}. {chunk}"
+        # Canonicalize the claim prefix to "<n>." (handles OCR like "15-4 ..." or "15) ...")
+        chunk = re.sub(
+            rf"^{re.escape(claim_num_str)}\s*(?:[\)\.:]|[-–—]\s*\d{{0,2}})\s*",
+            f"{claim_num_str}. ",
+            chunk,
+        )
+
+        # Validate that this looks like an actual claim
+        if not _looks_like_claim(chunk):
+            # If we've already found claims and hit something that doesn't look like a claim,
+            # it's likely we've left the claims section
+            if claims:
+                break
+            # Otherwise skip this match and continue
+            continue
+
+        # Detect breaks in sequential numbering during iteration:
+        # - tolerate skipped numbers (OCR drops claim numbers)
+        # - stop only on restart / large backward jump
+        if claim_numbers:
+            prev_num = claim_numbers[-1]
+            if claim_num < prev_num and (prev_num - claim_num) > 3:
+                break
+
+        # If expected_count provided and we've exceeded it significantly, stop
+        # Allow some overrun (20%) for OCR errors in front matter
+        if expected_count and len(claims) >= int(expected_count * 1.2) + 3:
+            break
 
         claims.append(chunk)
+        claim_numbers.append(claim_num)
 
     return claims
 
 
 def _find_claims_region_tail(text: str) -> Optional[Tuple[int, int, dict]]:
     """
-    Find a plausible claims region in the tail of the document using sequential numbering heuristics.
+    Find a plausible claims region in the tail of the document using numbering heuristics.
     Returns (start_offset, end_offset, diagnostics) or None.
+
+    Robustness notes:
+    - OCR often skips numbers (e.g., missing claim 7) or corrupts separators (e.g., "15-4").
+    - Therefore we do NOT require perfectly sequential numbering; we just want a dense cluster
+      of plausible claim starts that is mostly increasing.
     """
     if not text:
         return None
@@ -282,33 +487,33 @@ def _find_claims_region_tail(text: str) -> Optional[Tuple[int, int, dict]]:
     if len(matches) < 2:
         return None
 
-    # Evaluate candidate windows starting at each match
     best = None
     best_score = -1
-    best_diag = {}
+    best_diag: dict = {}
 
-    # idx_by_pos = [(m.start(), int(m.group(2))) for m in matches]
     idx_by_pos = [(m.start(), int(m.group(1))) for m in matches]
 
-    for i in range(len(idx_by_pos)):
-        pos_i, _ = idx_by_pos[i]
+    for pos_i, _ in idx_by_pos:
         window_end = min(len(tail), pos_i + 25000)  # deterministic window size
         window = tail[pos_i:window_end]
-
-        # ws = [int(m.group(2)) for m in _CLAIM_START_MARKER_RX.finditer(window)]
 
         ws = [int(m.group(1)) for m in _CLAIM_START_MARKER_RX.finditer(window)]
         if len(ws) < 5:
             continue
 
-        # sequentiality measure
+        inc = 0
         seq = 0
-        for a, b in zip(ws, ws[1:]):
-            if b == a + 1:
-                seq += 1
+        back_jumps = 0
 
-        # Score: prefer more matches and more sequential transitions
-        score = len(ws) + 2 * seq
+        for a, b in zip(ws, ws[1:]):
+            if b > a:
+                inc += 1
+                if b == a + 1:
+                    seq += 1
+            elif b < a and (a - b) > 3:
+                back_jumps += 1
+
+        score = (len(ws) * 2) + (inc * 2) + (seq * 3) - (back_jumps * 10)
 
         if score > best_score:
             best_score = score
@@ -318,7 +523,9 @@ def _find_claims_region_tail(text: str) -> Optional[Tuple[int, int, dict]]:
                 "window_start": tail_start + pos_i,
                 "window_end": tail_start + window_end,
                 "claim_starts_in_window": len(ws),
+                "increases": inc,
                 "sequential_transitions": seq,
+                "back_jumps": back_jumps,
                 "score": score,
                 "first_numbers": ws[:10],
             }
@@ -638,7 +845,7 @@ def parse_patent_body(
 
     texts: List[str] = []
     for i in range(start_used, num_pages):
-        from patent_ingest.two_column import extract_page_text_two_column
+        from doc_extractor.two_column import extract_page_text_two_column
 
         page_text = extract_page_text_two_column(reader, i)
         # page_text = reader.pages[i].extract_text() or ""

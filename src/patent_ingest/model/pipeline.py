@@ -3,16 +3,16 @@ from __future__ import annotations
 from typing import Dict, List
 import pymupdf
 
-from patent_ingest.model.model import Block, ColumnStream, PageLayout
-from patent_ingest.model.extract import extract_column_streams
-from patent_ingest.model.region import (
+from doc_extractor.model.model import Block, ColumnStream, PageLayout
+from doc_extractor.model.extract import extract_column_streams
+from doc_extractor.model.region import (
     split_header_body_generic,
     rescue_lines_from_header_into_body,
 )
-from patent_ingest.model.noise import detect_noise_cutoff_y, apply_cutoff
-from patent_ingest.model.segment_inid import segment_inid_blocks, inid_label_count
-from patent_ingest.model.segment_para import segment_paragraph_blocks
-from patent_ingest.model.stitch import (
+from doc_extractor.model.noise import detect_noise_cutoff_y, apply_cutoff
+from doc_extractor.model.segment_inid import segment_inid_blocks, inid_label_count
+from doc_extractor.model.segment_para import segment_paragraph_blocks
+from doc_extractor.model.stitch import (
     build_inid_dict,
     find_inid_cutoff_page,
 )
@@ -45,7 +45,7 @@ def build_page_layout(
         mid_gutter=mid_gutter,
         filter_line_numbers=filter_line_numbers,
     )
-    from patent_ingest.model.region import (
+    from doc_extractor.model.region import (
         choose_header_splitter,
         split_header_body_strict_metadata,
     )
@@ -65,7 +65,7 @@ def build_page_layout(
             max_band_height=max_band_height,
         )
 
-    from patent_ingest.model.util import (
+    from doc_extractor.model.util import (
         split_cross_gutter_header_lines,
     )
 

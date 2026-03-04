@@ -1,9 +1,0 @@
-[
-  {
-    "path": "res/test/figures/selected/figure_page-2.jpg",
-    "source": "rendered",
-    "page": 2,
-    "score": 0.16625485174134608,
-    "note": "coverage=0.186, edge_density=0.129"
-  }
-]

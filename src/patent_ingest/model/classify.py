@@ -3,8 +3,12 @@
 import re
 from dataclasses import dataclass
 from typing import Literal
+import statistics
+from typing import List
 
-#
+
+from .model import PageLayout
+from .segment_inid import inid_label_count
 
 
 @dataclass()
@@ -15,135 +19,6 @@ class PageType:
     # para_markers: int
     paras: int
 
-
-#
-# SHEET_RE = re.compile(r"\bSheet\s+\d+\s+of\s+\d+\b", re.IGNORECASE)
-# FIG_RE = re.compile(r"^\s*Fig\.\s*\d+\b", re.IGNORECASE)
-# PARA_RE = re.compile(r"^\s*\d{4}\s*[.\)]\s*")
-#
-#
-# def _para_count(layout, region="body") -> int:
-#     c = 0
-#     for col in ("L", "R"):
-#         for ln in layout.stream(region, col).lines:
-#             if PARA_RE.match(ln.text):
-#                 c += 1
-#     return c
-#
-#
-# def _header_text(layout) -> str:
-#     parts = []
-#     for col in ("L", "R"):
-#         parts.extend(ln.text for ln in layout.header[col].lines if ln.text)
-#     return " ".join(parts)
-#
-#
-# def _body_text(layout) -> str:
-#     parts = []
-#     for col in ("L", "R"):
-#         parts.extend(ln.text for ln in layout.body[col].lines if ln.text)
-#     return " ".join(parts)
-#
-#
-# def classify_page(layout, *, region="body"):
-#     print(len(layout.body["L"].lines), len(layout.body["R"].lines))
-#     inids = inid_label_count(layout.stream(region, "L")) + inid_label_count(
-#         layout.stream(region, "R")
-#     )
-#     paras = _para_count(layout, region=region)
-#
-#     header = _header_text(layout)
-#     body = _body_text(layout)
-#
-#     # 1) Drawing sheets: header "Sheet X of Y" is decisive
-#     if SHEET_RE.search(header):
-#         return PageType("drawing", inids, paras)
-#
-#     # 2) Also treat as drawing if it has Fig labels but no paragraph markers and no INID run
-#     if FIG_RE.search(body) and paras == 0 and inids < 3:
-#         return PageType("drawing", inids, paras)
-#
-#     # 3) INID / body as before
-#     print(f"Classify page: inids={inids}, paras={paras}")
-#     if inids >= 3 and paras < 2:
-#         return PageType("inid", inids, paras)
-#     if paras >= 2 and inids < 3:
-#         return PageType("body", inids, paras)
-#     if inids >= 3 and paras >= 2:
-#         return PageType("body", inids, paras)
-#
-#     return PageType("unknown", inids, paras)
-#
-# import statistics
-#
-# SHEET_RE = re.compile(r"\bSheet\s+\d+\s+of\s+\d+\b", re.IGNORECASE)
-#
-# KNOWN_BODY_HEADINGS = {
-#     "BACKGROUND",
-#     "SUMMARY",
-#     "DETAILED DESCRIPTION",
-#     "BRIEF DESCRIPTION OF THE DRAWINGS",
-#     "CLAIMS",
-#     "FIELD",
-#     "TECHNICAL FIELD",
-# }
-#
-#
-# def _header_text(layout) -> str:
-#     parts = []
-#     for col in ("L", "R"):
-#         parts.extend(ln.text for ln in layout.header[col].lines if ln.text)
-#     return " ".join(parts)
-#
-#
-# def _body_lines(layout) -> list[str]:
-#     out = []
-#     for col in ("L", "R"):
-#         out.extend((ln.text or "").strip() for ln in layout.body[col].lines)
-#     return [t for t in out if t]
-#
-#
-# def _looks_like_heading_line(t: str) -> bool:
-#     u = t.strip().upper()
-#     return u in KNOWN_BODY_HEADINGS
-#
-#
-# def classify_page(
-#     layout, *, min_inids: int = 3, min_body_lines: int = 25, min_median_len: int = 25
-# ):
-#     header = _header_text(layout)
-#     if SHEET_RE.search(header):
-#         return PageType("drawing", inids=0, paras=0)
-#
-#     body_lines = _body_lines(layout)
-#
-#     # your existing inid count logic
-#     inids = inid_label_count(layout.body["L"]) + inid_label_count(layout.body["R"])
-#     if inids >= min_inids:
-#         return PageType("inid", inids=inids, paras=0)
-#
-#     # heading-based body signal
-#     if any(_looks_like_heading_line(t) for t in body_lines[:60]):  # early part of page
-#         return PageType("body", inids=inids, paras=0)
-#
-#     # density-based body fallback
-#     if len(body_lines) >= min_body_lines:
-#         lens = [len(t) for t in body_lines]
-#         med = int(statistics.median(lens)) if lens else 0
-#         if med >= min_median_len:
-#             return PageType("body", inids=inids, paras=0)
-#
-#     return PageType("unknown", inids=inids, paras=0)
-#
-
-
-import statistics
-from dataclasses import dataclass
-from typing import List, Literal
-
-
-from .model import PageLayout
-from .segment_inid import inid_label_count
 
 # --- drawing header ---
 SHEET_RE = re.compile(r"\bSheet\s+\d+\s+of\s+\d+\b", re.IGNORECASE)

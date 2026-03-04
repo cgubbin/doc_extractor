@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Dict, List, Optional
 import re
 
-from patent_ingest.model.model import Block, ColumnStream, Region
+from doc_extractor.model.model import Block, ColumnStream, Region
 
 INID_START_RE = re.compile(r"^\(\s*(\d+)\s*\)")
 

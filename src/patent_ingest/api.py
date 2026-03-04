@@ -9,12 +9,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional, Protocol, runtime_checkable
 
-from patent_ingest.pipeline import (
+from doc_extractor.pipeline import (
     OrchestratorConfig,
     ingest_patent_pdf,
     IngestionResult,
 )
-from patent_ingest.structured_logger import get_logger
+from doc_extractor.structured_logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -46,6 +46,8 @@ class ParseOptions:
     # segmentation: if True, attempt to detect individual figures in drawings
     # (drawing_sheets.process_drawing_sheets uses detect_figures + export_figures_png)
     use_opencv: bool = True
+
+    fail_on_missing_inid: bool = True
 
 
 @dataclass(frozen=True)
@@ -221,6 +223,7 @@ def parse_patent(
             export_pdf=options.export_sheet_pdf,
             export_png=options.export_sheet_png,
             segment_drawings=False,  # segmentation is controlled inside drawing_sheets by detect_figures
+            fail_on_missing_inid=options.fail_on_missing_inid,
         )
         # Pipeline supports artifact output_dir; we pass None to keep this pure.
         result = ingest_patent_pdf(pdf_path_use, output_dir=None, config=config)
@@ -353,14 +356,14 @@ def export_artifacts(
                 export_figures=spec.export_figure_pngs,
             )
             # To export we need to re-run drawing_sheets.process_drawing_sheets with output_dir.
-            from patent_ingest.drawing_sheets.export import export_drawing_artifacts
+            from doc_extractor.drawing_sheets.export import export_drawing_artifacts
 
             data = parse_result.ingested.data.drawing_sheets
 
             export_dir = tmp_out / "drawings"
             export_dir.mkdir(parents=True, exist_ok=True)
 
-            from patent_ingest.drawing_sheets.export import ExportPolicy
+            from doc_extractor.drawing_sheets.export import ExportPolicy
 
             export_drawing_artifacts(
                 data,
@@ -396,7 +399,7 @@ def export_artifacts(
 
         # Always write manifest and diagnostics (not just when exporting drawings)
         from datetime import datetime
-        from patent_ingest.diagnostics import DiagFormat
+        from doc_extractor.diagnostics import DiagFormat
 
         manifest["created_utc"] = datetime.today().strftime("%Y-%m-%d")
         manifest["elapsed_time_ms"] = round(parse_result.elapsed_time_ms, 2)

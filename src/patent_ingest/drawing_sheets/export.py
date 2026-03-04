@@ -27,9 +27,9 @@ from typing import Any, Dict, Optional, Tuple
 import re
 
 # Import segmentation types
-from patent_ingest.diagnostics import Diagnostics
-from patent_ingest.drawing_sheets.model import DrawingSheetsData
-from patent_ingest.drawing_sheets.segment import BBoxNorm
+from doc_extractor.diagnostics import Diagnostics
+from doc_extractor.drawing_sheets.model import DrawingSheetsData
+from doc_extractor.drawing_sheets.segment import BBoxNorm
 
 
 class ExportStatus(str, Enum):

@@ -5,8 +5,8 @@ from typing import List, Optional, Literal
 import re
 import statistics
 
-from patent_ingest.model.model import Block, ColumnStream, Region
-from patent_ingest.common.section_rules import is_known_section_heading
+from doc_extractor.model.model import Block, ColumnStream, Region
+from doc_extractor.common.section_rules import is_known_section_heading
 
 
 @dataclass(frozen=True)
@@ -215,7 +215,7 @@ def segment_paragraph_blocks(
         if role == "enumerator":
             # Check if this is a multi-digit claim number (1-3 digits + period)
             # These should start new paragraphs for proper claim separation
-            if re.match(r'^\s*\d{1,3}\s*\.\s*$', t):
+            if re.match(r"^\s*\d{1,3}\s*\.\s*$", t):
                 flush_paragraph()
                 buf.append(i)
             else:

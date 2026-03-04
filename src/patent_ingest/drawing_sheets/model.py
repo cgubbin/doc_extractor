@@ -3,9 +3,9 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Optional, Sequence, Tuple, Dict
 
-from patent_ingest.diagnostics import Diagnostics
-from patent_ingest.drawing_sheets.policy import DrawingSheetsPolicy
-from patent_ingest.drawing_sheets.segment import (
+from doc_extractor.diagnostics import Diagnostics
+from doc_extractor.drawing_sheets.policy import DrawingSheetsPolicy
+from doc_extractor.drawing_sheets.segment import (
     _segment_drawings_on_page,
     PDFPageRef,
     SheetParse,

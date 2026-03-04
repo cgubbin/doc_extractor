@@ -5,9 +5,9 @@ from typing import Optional
 
 from pydantic import BaseModel, Field, ConfigDict, field_validator
 
-from patent_ingest.diagnostics import Diagnostics
-from patent_ingest.structured_logger import get_logger
-from patent_ingest.model.analysis import InidResult
+from doc_extractor.diagnostics import Diagnostics
+from doc_extractor.structured_logger import get_logger
+from doc_extractor.model.analysis import InidResult
 
 
 # ---------- enums ----------

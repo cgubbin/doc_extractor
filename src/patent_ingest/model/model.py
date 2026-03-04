@@ -80,7 +80,7 @@ class PageLayout:
         return "\n".join(t for _, t in lines if t).strip()
 
     def split_cross_gutter_header_lines(self) -> "PageLayout":
-        from patent_ingest.model.util import split_cross_gutter_header_lines
+        from doc_extractor.model.util import split_cross_gutter_header_lines
 
         l, r = split_cross_gutter_header_lines(
             self.header["L"].lines, self.header["R"].lines

@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Optional
 import re
 
-from patent_ingest.diagnostics import Diagnostics
+from doc_extractor.diagnostics import Diagnostics
 
 from .registry import INIDKind, ParsePolicy
 from .parser import ParsedFrontMatter
@@ -128,7 +128,11 @@ def parse_front_matter_semantic(
 
     # Prior publication data (65) stored separately
     prior_pub_raw = raw.inid.get(INIDKind._65, "").strip()
-    prior_pub_tokens = extract_patent_id_tokens(prior_pub_raw, include_bare_us=True) if prior_pub_raw else []
+    prior_pub_tokens = (
+        extract_patent_id_tokens(prior_pub_raw, include_bare_us=True)
+        if prior_pub_raw
+        else []
+    )
     prior_pub_primary = _primary_or_none(prior_pub_tokens)
 
     app_raw = "\n".join([app21_clean, raw.inid.get(INIDKind._86, "")]).strip()
@@ -177,7 +181,9 @@ def parse_front_matter_semantic(
         diagnostics=diag,
         identification=Identification(
             publication=TokenField(raw=pub_raw, tokens=pub_tokens, primary=pub_primary),
-            prior_publication=TokenField(raw=prior_pub_raw, tokens=prior_pub_tokens, primary=prior_pub_primary),
+            prior_publication=TokenField(
+                raw=prior_pub_raw, tokens=prior_pub_tokens, primary=prior_pub_primary
+            ),
         ),
         application=Application(
             application_number=TokenField(

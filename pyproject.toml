@@ -1,5 +1,5 @@
 [project]
-name = "patent_ingest"
+name = "doc_extractor"
 version = "0.1.0"
 description = "Patent PDF parsing (front matter, drawings, body)"
 requires-python = ">=3.10"
@@ -31,7 +31,7 @@ include-package-data = true
 patent-ingest = "patent_ingest.__main__:main"
 
 [tool.setuptools.package-data]
-"patent_ingest" = ["schemas/*.json"]
+"doc_extractor" = ["schemas/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -56,7 +56,7 @@ markers = [
 ]
 
 [tool.coverage.run]
-source = ["src/patent_ingest"]
+source = ["src/doc_extractor"]
 omit = ["*/tests/*", "*/__pycache__/*", "*/test_*.py"]
 branch = true
 
@@ -76,6 +76,4 @@ exclude_lines = [
 ]
 
 [dependency-groups]
-dev = [
-    "hypothesis>=6.151.4",
-]
+dev = ["hypothesis>=6.151.4"]

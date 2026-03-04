@@ -3,7 +3,7 @@ from typing import List, Tuple, Optional
 import pymupdf
 
 import re
-from patent_ingest.model.model import Line
+from doc_extractor.model.model import Line
 
 
 def _rect_intersection_area(a: pymupdf.Rect, b: pymupdf.Rect) -> float:

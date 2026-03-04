@@ -4,7 +4,7 @@ import re
 from typing import Dict, List
 import pymupdf
 
-from patent_ingest.model.model import Col, Line
+from doc_extractor.model.model import Col, Line
 
 _PUNCT_NO_SPACE_BEFORE = {",", ".", ";", ":", ")", "]", "}", "%"}
 _PUNCT_NO_SPACE_AFTER = {"(", "[", "{"}
@@ -71,11 +71,11 @@ def _is_likely_line_number(text: str) -> bool:
         return False
 
     # Never filter parenthesized numbers - these are INID codes
-    if text.startswith('(') and text.endswith(')'):
+    if text.startswith("(") and text.endswith(")"):
         return False
 
     # Never filter numbers followed by period - these are claim/list markers
-    if re.match(r'^\d{1,3}\.$', text):
+    if re.match(r"^\d{1,3}\.$", text):
         return False
 
     # Match pure numbers or numbers with minimal decoration
@@ -174,7 +174,9 @@ def extract_column_streams(
         # f"Extracted {len(raw) if raw else 0} words from OCR on page {page.number}"
         # )
 
-    line_map: dict[tuple[int, int], list[tuple[float, float, float, float, str]]] = {}
+    # Instead of trusting PyMuPDF's (block_no, line_no) grouping which can be wrong,
+    # group words by actual y-coordinate proximity (more robust)
+    all_words: list[tuple[float, float, float, float, str]] = []
 
     # word tuple: x0,y0,x1,y1,text, block_no,line_no,word_no
     for w in raw:
@@ -185,9 +187,24 @@ def extract_column_streams(
         t = str(text).strip()
         if not t:
             continue
-        line_map.setdefault((int(bno), int(lno)), []).append(
-            (float(x0), float(y0), float(x1), float(y1), t)
-        )
+        all_words.append((float(x0), float(y0), float(x1), float(y1), t))
+
+    # Group words into lines by y-coordinate proximity (±3 pixels)
+    line_map: dict[int, list[tuple[float, float, float, float, str]]] = {}
+    for word in all_words:
+        x0, y0, x1, y1, text = word
+        y_center = 0.5 * (y0 + y1)
+
+        # Find existing line within ±3 pixels, or create new one
+        matched = False
+        for line_y, words in line_map.items():
+            if abs(y_center - line_y) <= 3.0:
+                words.append(word)
+                matched = True
+                break
+
+        if not matched:
+            line_map[int(y_center)] = [word]
 
     L: List[Line] = []
     R: List[Line] = []
@@ -225,7 +242,9 @@ def extract_column_streams(
         maxy = max(w[3] for w in ws_filtered)
         cx = 0.5 * (minx + maxx)
 
-        left_words, right_words = _split_words_by_largest_gap(ws_filtered, min_gap=min_split_gap)
+        left_words, right_words = _split_words_by_largest_gap(
+            ws_filtered, min_gap=min_split_gap
+        )
 
         if right_words:
             lt = _join_words_stably(left_words)
@@ -277,9 +296,13 @@ def extract_column_streams(
 
                     # Assign to L or R based on position relative to page midpoint
                     if cx_c > x_mid:
-                        R.append(Line(y0=miny_c, y1=maxy_c, x0=minx_c, x1=maxx_c, text=t))
+                        R.append(
+                            Line(y0=miny_c, y1=maxy_c, x0=minx_c, x1=maxx_c, text=t)
+                        )
                     else:
-                        L.append(Line(y0=miny_c, y1=maxy_c, x0=minx_c, x1=maxx_c, text=t))
+                        L.append(
+                            Line(y0=miny_c, y1=maxy_c, x0=minx_c, x1=maxx_c, text=t)
+                        )
 
     L.sort(key=lambda ln: ln.y)
     R.sort(key=lambda ln: ln.y)

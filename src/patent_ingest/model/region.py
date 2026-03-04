@@ -4,7 +4,7 @@ from typing import Dict, List, Optional, Tuple
 import statistics
 import re
 
-from patent_ingest.model.model import Col, Line
+from doc_extractor.model.model import Col, Line
 
 
 from typing import Literal

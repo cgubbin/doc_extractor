@@ -4,8 +4,8 @@ from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from patent_ingest.diagnostics import Diagnostics
-from patent_ingest.model.analysis import InidResult
+from doc_extractor.diagnostics import Diagnostics
+from doc_extractor.model.analysis import InidResult
 
 from .registry import (
     INIDKind,
@@ -78,7 +78,7 @@ def parse_front_matter(raw: InidResult, *, policy: ParsePolicy) -> ParsedFrontMa
 
     Token extraction + typed semantic parsing will be layered on next.
     """
-    from patent_ingest.structured_logger import get_logger
+    from doc_extractor.structured_logger import get_logger
 
     logger = get_logger(__name__)
 

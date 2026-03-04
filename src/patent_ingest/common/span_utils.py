@@ -7,8 +7,8 @@ location information for extracted patent data.
 import re
 from typing import Any, Sequence
 
-from patent_ingest.model.span import Span, Position, Where, MultiSpan
-from patent_ingest.parsed import ParsedRaw
+from doc_extractor.model.span import Span, Position, Where
+from doc_extractor.parsed import ParsedRaw
 
 
 def cut_at_earliest_with_idx(

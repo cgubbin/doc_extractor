@@ -1,16 +1,16 @@
-"""Logging configuration for patent_ingest.
+"""Logging configuration for doc_extractor.
 
 This module provides a thin wrapper around structlog for structured logging.
 Logging is optional and can be disabled via environment variable.
 
 Environment Variables:
-    PATENT_INGEST_LOG_LEVEL: Set log level (DEBUG, INFO, WARNING, ERROR)
+    doc_extractor_LOG_LEVEL: Set log level (DEBUG, INFO, WARNING, ERROR)
                               Default: INFO
-    PATENT_INGEST_LOG_DISABLE: Set to "1" to disable all logging
+    doc_extractor_LOG_DISABLE: Set to "1" to disable all logging
                                 Default: logging enabled
 
 Usage:
-    from patent_ingest.structured_logger import get_logger
+    from doc_extractor.structured_logger import get_logger
 
     logger = get_logger(__name__)
     logger.info("parsing_started", pdf_path=str(pdf_path), pages=page_count)
@@ -25,10 +25,10 @@ import structlog
 
 
 # Check if logging is disabled
-_LOGGING_DISABLED = os.getenv("PATENT_INGEST_LOG_DISABLE", "0") == "1"
+_LOGGING_DISABLED = os.getenv("doc_extractor_LOG_DISABLE", "0") == "1"
 
 # Get log level from environment
-_LOG_LEVEL_STR = os.getenv("PATENT_INGEST_LOG_LEVEL", "INFO").upper()
+_LOG_LEVEL_STR = os.getenv("doc_extractor_LOG_LEVEL", "INFO").upper()
 _LOG_LEVEL = getattr(logging, _LOG_LEVEL_STR, logging.INFO)
 
 

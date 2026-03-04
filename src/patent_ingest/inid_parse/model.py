@@ -4,7 +4,7 @@ from typing import Optional, List, Dict, Set
 
 from pydantic import BaseModel, Field, ConfigDict
 
-from patent_ingest.diagnostics import Diagnostics, Issue
+from doc_extractor.diagnostics import Diagnostics, Issue
 
 
 class Confidence(str, Enum):

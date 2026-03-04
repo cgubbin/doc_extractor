@@ -15,11 +15,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterator, Callable
 
-from patent_ingest.load import (
+from doc_extractor.load import (
     PatentDocument,
     FigureDescription,
 )
-from patent_ingest.body.claims import Claim
+from doc_extractor.body.claims import Claim
 
 
 @dataclass(frozen=True)
@@ -414,7 +414,7 @@ def load_patent(bundle_dir: str | Path) -> EnhancedPatentDocument:
     Returns:
         EnhancedPatentDocument with query and export methods
     """
-    from patent_ingest.load import load_patent as lp
+    from doc_extractor.load import load_patent as lp
 
     doc = lp(str(bundle_dir))
     return EnhancedPatentDocument(doc)
