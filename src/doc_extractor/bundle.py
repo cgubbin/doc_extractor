@@ -20,6 +20,9 @@ from doc_extractor.load import (
     FigureDescription,
 )
 from doc_extractor.body.claims import Claim
+from doc_extractor.structured_logger import get_logger
+
+logger = get_logger(__name__)
 
 
 @dataclass(frozen=True)
@@ -439,7 +442,7 @@ def load_patents_from_directory(
             yield load_patent(bundle_dir)
         except Exception as e:
             # Log error but continue processing other patents
-            print(f"Warning: Failed to load {bundle_dir}: {e}")
+            logger.warning("failed_to_load_patent", bundle_dir=str(bundle_dir), error=str(e))
             continue
 
 

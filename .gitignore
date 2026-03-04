@@ -9,5 +9,8 @@ build/
 tests/unit/__pycache__/
 tests/integration/__pycache__/
 tests/__pycache__/
-src/patent_ingest.egg-info
-src/patent_ingest/__pycache__/
+src/doc_extractor.egg-info
+src/doc_extractor/__pycache__/
+.hypothesis/
+./pytest_cache/
+

@@ -1,4 +1,0 @@
-# file: /Users/kit/Repos/pdf_ingest/src/patent_ingest/model/region.py
-# hypothesis_version: 6.151.4
-
-[0.22, 0.45, 2.0, 2.5, 4.0, 10.0, 20.0, 24.0, 30.0, 'L', 'R', '^\\(\\s*\\d+\\s*\\)']

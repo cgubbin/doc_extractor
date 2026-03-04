@@ -28,7 +28,7 @@ where = ["src"]
 include-package-data = true
 
 [project.scripts]
-patent-ingest = "patent_ingest.__main__:main"
+doc_extractor = "doc_extractor.__main__:main"
 
 [tool.setuptools.package-data]
 "doc_extractor" = ["schemas/*.json"]
@@ -38,17 +38,7 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-addopts = [
-    "--verbose",
-    "--strict-markers",
-    "--strict-config",
-    # Coverage options (requires pytest-cov to be installed)
-    # "--cov=src/patent_ingest",
-    # "--cov-report=term-missing",
-    # "--cov-report=html:htmlcov",
-    # "--cov-report=json:coverage.json",
-    # "--cov-branch",
-]
+addopts = ["--verbose", "--strict-markers", "--strict-config"]
 markers = [
     "unit: Unit tests (fast, no external dependencies)",
     "integration: Integration tests (may require test files)",

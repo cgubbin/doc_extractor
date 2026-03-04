@@ -1,4 +1,0 @@
-# file: /Users/kit/Repos/pdf_ingest/src/patent_ingest/model/model.py
-# hypothesis_version: 6.151.4
-
-[0.5, 'L', 'R', 'body', 'column-major', 'header', 'inid', 'noise', 'paragraph', 'row-major', 'unlabelled']

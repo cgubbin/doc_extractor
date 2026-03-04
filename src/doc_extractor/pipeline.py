@@ -335,7 +335,7 @@ def ingest_patent_pdf(
     )
 
     for each in diag.errors():
-        print(f"ERROR: {each}")
+        logger.error("ingestion_error", error=str(each))
 
     logger.info(
         "ingestion_completed",

@@ -1,4 +1,0 @@
-# file: /Users/kit/Repos/pdf_ingest/.venv/bin/pytest
-# hypothesis_version: 6.151.4
-
-['-script.pyw', '.exe', '__main__']

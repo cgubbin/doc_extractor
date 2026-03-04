@@ -1,4 +1,0 @@
-# file: /Users/kit/Repos/pdf_ingest/src/patent_ingest/model/classify.py
-# hypothesis_version: 6.151.4
-
-['L', 'R', '^\\s*Fig\\.\\s*\\d+\\b', '^\\s*\\d{4}\\s*[.\\)]\\s*', 'body', 'drawing', 'inid', 'unknown']

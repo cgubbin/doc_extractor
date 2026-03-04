@@ -1,4 +1,0 @@
-# file: /Users/kit/Repos/pdf_ingest/src/patent_ingest/model/segment_inid.py
-# hypothesis_version: 6.151.4
-
-[0.0, 0.001, 0.4, 70.0, 90.0, 900.0, '^\\(\\s*(\\d+)\\s*\\)', 'inf', 'inid', 'unlabelled']

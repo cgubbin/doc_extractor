@@ -229,36 +229,3 @@ def analyze_document(doc: pymupdf.Document) -> DocumentAnalysis:
         body=BodyResult(blocks=body_blocks, pages=body_pages, headings=headings),
         drawings=DrawingResult(page_indices=drawing_pages, count=len(drawing_pages)),
     )
-
-
-if __name__ == "__main__":
-    # doc = pymupdf.open("/Users/kit/Repos/patent_crawler/data/pdfs/US20110054659A1.pdf")
-    doc = pymupdf.open(
-        # "/Users/kit/Repos/pdf_ingest/tests/fixtures/pdfs/US7629993B2.pdf"
-        "/Users/kit/Repos/pdf_ingest/tests/fixtures/pdfs/US9587932B2.pdf"
-        # "/Users/kit/Repos/pdf_ingest/tests/fixtures/pdfs/US10107621B2.pdf"
-        # "/Users/kit/Repos/pdf_ingest/tests/fixtures/pdfs/US10935501B2.pdf"
-        # "/Users/kit/Repos/pdf_ingest/tests/fixtures/pdfs/US10937705B2.pdf"
-        # "/Users/kit/Repos/pdf_ingest/tests/fixtures/pdfs/US11346768B1.pdf"
-    )
-    analysis = analyze_document(doc)
-
-    sorted_inids = sorted(analysis.inid.fields.items())
-    for each in sorted_inids:
-        print("INID:", each)
-
-    # print(analysis.drawings)
-    #
-    # for each in analysis.body.headings:
-    #     print("Para: ", each)
-    # #
-    # sections = sections_from_blocks(analysis.body.blocks)
-    #
-    # for sec, blocks in sections.items():
-    #     print("SECTION:", sec)
-    #     for b in blocks:
-    #         print("  ", b)
-    # # print(analysis.body.pages)
-    #
-    # # for each in analysis.body.blocks:
-    # # print("Para: ", each)
