@@ -33,17 +33,17 @@ doc_extractor = "doc_extractor.__main__:main"
 [tool.setuptools.package-data]
 "doc_extractor" = ["schemas/*.json"]
 
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-python_files = ["test_*.py"]
-python_classes = ["Test*"]
-python_functions = ["test_*"]
-addopts = ["--verbose", "--strict-markers", "--strict-config"]
-markers = [
-    "unit: Unit tests (fast, no external dependencies)",
-    "integration: Integration tests (may require test files)",
-    "slow: Slow tests (e.g., full pipeline runs)",
-]
+# [tool.pytest.ini_options]
+# testpaths = ["tests"]
+# python_files = ["test_*.py"]
+# python_classes = ["Test*"]
+# python_functions = ["test_*"]
+# addopts = ["--verbose", "--strict-markers", "--strict-config"]
+# markers = [
+#     "unit: Unit tests (fast, no external dependencies)",
+#     "integration: Integration tests (may require test files)",
+#     "slow: Slow tests (e.g., full pipeline runs)",
+# ]
 
 [tool.coverage.run]
 source = ["src/doc_extractor"]
@@ -66,4 +66,4 @@ exclude_lines = [
 ]
 
 [dependency-groups]
-dev = ["hypothesis>=6.151.4"]
+dev = ["hypothesis>=6.151.4", "pytest>=9.0.2", "pytest-cov>=7.0.0"]

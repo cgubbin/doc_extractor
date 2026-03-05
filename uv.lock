@@ -166,6 +166,8 @@ dev = [
 [package.dev-dependencies]
 dev = [
     { name = "hypothesis" },
+    { name = "pytest" },
+    { name = "pytest-cov" },
 ]
 
 [package.metadata]
@@ -184,7 +186,11 @@ requires-dist = [
 provides-extras = ["dev"]
 
 [package.metadata.requires-dev]
-dev = [{ name = "hypothesis", specifier = ">=6.151.4" }]
+dev = [
+    { name = "hypothesis", specifier = ">=6.151.4" },
+    { name = "pytest", specifier = ">=9.0.2" },
+    { name = "pytest-cov", specifier = ">=7.0.0" },
+]
 
 [[package]]
 name = "exceptiongroup"
